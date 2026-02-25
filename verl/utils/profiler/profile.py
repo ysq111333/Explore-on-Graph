@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 from typing import Callable, Optional
@@ -20,32 +8,16 @@ import torch.distributed
 
 from .config import ProfilerConfig
 
-
 class Profiler:
-    """A PyTorch profiler wrapper class for collecting performance metrics.
-
-    TODO(haibin.lin): this should implement the DistProfiler interface, and the config should be unified.
-
-    This profiler provides a convenient interface for profiling PyTorch operations,
-    with support for:
-
-    - CPU and CUDA activity profiling
-    - Configurable profiling schedule (wait/warmup/active steps)
-    - Multi-rank profiling support
-    - Chrome trace export
-
-    Args:
-        config: Configuration object containing profiling parameters
-    """
 
     def __init__(self, config):
-        # note : if we do not set use_profile, it will be set as None, so that all function will be skip
+
         self.config = config
         self.skip_prof = False
         self.saved = False
         self.prof = None
         self.rank = torch.distributed.get_rank()
-        # we need to validate the config before using the profiler
+
         self._validate()
         if config.use_profile and self.rank in self.config.profile_ranks:
             print(f"[Profiler] Profiler init for rank {self.rank}")
@@ -113,32 +85,16 @@ class Profiler:
             print(f"[Profiler] Trace stopped for rank {self.rank}")
             self.skip_prof = True
 
-
 def mark_start_range(
     message: Optional[str] = None,
     color: Optional[str] = None,
     domain: Optional[str] = None,
     category: Optional[str] = None,
 ) -> None:
-    """Start a profiling range marker (no-op implementation).
-
-    Args:
-        message (Optional[str]): Message to associate with the range marker.
-        color (Optional[str]): Color for the marker visualization.
-        domain (Optional[str]): Domain for the marker.
-        category (Optional[str]): Category for the marker.
-    """
     pass
-
 
 def mark_end_range(range_id: str) -> None:
-    """End a profiling range marker (no-op implementation).
-
-    Args:
-        range_id (str): Identifier of the range to end.
-    """
     pass
-
 
 def mark_annotate(
     message: Optional[str] = None,
@@ -146,35 +102,13 @@ def mark_annotate(
     domain: Optional[str] = None,
     category: Optional[str] = None,
 ) -> Callable:
-    """Decorator to annotate a function with profiling markers (no-op implementation).
-
-    Args:
-        message (Optional[str]): Message to associate with the annotation.
-        color (Optional[str]): Color for the marker visualization.
-        domain (Optional[str]): Domain for the marker.
-        category (Optional[str]): Category for the marker.
-
-    Returns:
-        Callable: Decorator function that returns the original function unchanged.
-    """
 
     def decorator(func):
         return func
 
     return decorator
 
-
 class DistProfiler:
-    """A distributed profiler class for collecting performance metrics across multiple ranks.
-
-    This profiler is designed to work in distributed training environments, allowing selective
-    profiling of specific ranks or all ranks. It provides basic start/stop functionality and
-    supports annotation of code sections for detailed profiling.
-
-    Args:
-        rank (int): The rank of the current process
-        config (ProfilerConfig, optional): Configuration for the profiler.
-    """
 
     def __init__(self, rank: int, config: Optional[ProfilerConfig] = None, **kwargs):
         pass
@@ -198,18 +132,7 @@ class DistProfiler:
 
         return decorator
 
-
 class DistProfilerExtension:
-    """An extension class for DistProfiler that provides distributed profiling capabilities.
-
-    It is intended for workers in verl that single controller invokes.
-
-    This class wraps a DistProfiler instance and provides methods to start/stop profiling
-    that can be dispatched across multiple ranks in a distributed training environment.
-
-    Args:
-        profiler (DistProfiler): The base distributed profiler instance to extend
-    """
 
     def __init__(self, profiler: DistProfiler):
         self.profiler = profiler
@@ -218,10 +141,8 @@ class DistProfilerExtension:
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def start_profile(self, **kwargs) -> None:
-        """Start profiling for the current rank in the current training step."""
         self.profiler.start(**kwargs)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def stop_profile(self) -> None:
-        """Stop profiling for the current rank in the current training step."""
         self.profiler.stop()

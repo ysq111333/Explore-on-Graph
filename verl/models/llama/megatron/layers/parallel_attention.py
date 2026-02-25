@@ -1,22 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
-#
-# This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
-# and OPT implementations in this library. It has been modified from its
-# original forms to accommodate minor architectural differences compared
-# to GPT-NeoX and OPT used by the Meta AI team that trained the model.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import math
 from typing import Optional
@@ -34,7 +16,6 @@ from transformers.utils import is_flash_attn_2_available
 from verl.models.llama.megatron.layers.parallel_linear import QKVParallelLinear
 from verl.utils.megatron import tensor_parallel as tp_utils
 
-
 class LlamaRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
@@ -45,7 +26,6 @@ class LlamaRotaryEmbedding(nn.Module):
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-        # Build here to make `torch.jit.trace` work.
         self._set_cos_sin_cache(
             seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype()
         )
@@ -55,13 +35,13 @@ class LlamaRotaryEmbedding(nn.Module):
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
+
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
-        # x: [bs, num_attention_heads, seq_len, head_size]
+
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
 
@@ -70,9 +50,7 @@ class LlamaRotaryEmbedding(nn.Module):
             self.sin_cached[:seq_len].to(dtype=x.dtype),
         )
 
-
 class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
-    """LlamaRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
 
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
         self.scaling_factor = scaling_factor
@@ -84,14 +62,12 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
         t = t / self.scaling_factor
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
+
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
-
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
-    """LlamaRotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
 
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
         self.scaling_factor = scaling_factor
@@ -110,30 +86,29 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
+
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
-
 
 class LlamaLlama3ScalingRotaryEmbedding(LlamaRotaryEmbedding):
     def __init__(self, dim, config, max_position_embeddings=2048, base=10000, device=None):
         super().__init__(dim, max_position_embeddings, base, device)
 
-        self.factor = config.rope_scaling["factor"]  # `8` in the original implementation
-        self.high_freq_factor = config.rope_scaling["high_freq_factor"]  # `1` in the original implementation
-        self.low_freq_factor = config.rope_scaling["low_freq_factor"]  # `4` in the original implementation
+        self.factor = config.rope_scaling["factor"]
+        self.high_freq_factor = config.rope_scaling["high_freq_factor"]
+        self.low_freq_factor = config.rope_scaling["low_freq_factor"]
         self.old_context_len = config.rope_scaling[
             "original_max_position_embeddings"
-        ]  # `8192` in the original implementation
+        ]
 
         low_freq_wavelen = self.old_context_len / self.low_freq_factor
         high_freq_wavelen = self.old_context_len / self.high_freq_factor
 
         wavelen = 2 * math.pi / self.inv_freq
-        # wavelen < high_freq_wavelen: do nothing; wavelen > low_freq_wavelen: divide by factor
+
         inv_freq_llama = torch.where(wavelen > low_freq_wavelen, self.inv_freq / self.factor, self.inv_freq)
-        # otherwise: interpolate between the two, using a smooth factor
+
         smooth_factor = (self.old_context_len / wavelen - self.low_freq_factor) / (
             self.high_freq_factor - self.low_freq_factor
         )
@@ -143,41 +118,30 @@ class LlamaLlama3ScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-        # Build here to make `torch.jit.trace` work.
         self._set_cos_sin_cache(
             seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype()
         )
 
-
 def rotate_half(x):
-    """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
-
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
-    cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
+    cos = cos[position_ids].unsqueeze(1)
+    sin = sin[position_ids].unsqueeze(1)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
-
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
-    """
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
-
 class ParallelLlamaAttention(nn.Module):
-    """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: LlamaConfig, megatron_config: ModelParallelConfig):
         super().__init__()
@@ -191,7 +155,6 @@ class ParallelLlamaAttention(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
 
-        # assign values after tp
         tp_size = mpu.get_tensor_model_parallel_world_size()
         assert self.num_heads % tp_size == 0, (
             f"num_head must be divisible by tp_size. Got num_head={self.num_heads}, tp_size={tp_size}"
@@ -220,7 +183,6 @@ class ParallelLlamaAttention(nn.Module):
             tp_utils.update_kwargs_with_config(column_kwargs, megatron_config)
             tp_utils.update_kwargs_with_config(row_kwargs, megatron_config)
 
-        # [self.q_size, self.k_size, self.v_size]
         self.qkv_proj = QKVParallelLinear(
             input_size=self.hidden_size,
             num_heads=self.num_heads,
@@ -321,7 +283,6 @@ class ParallelLlamaAttention(nn.Module):
                 )
             attn_weights = attn_weights + attention_mask
 
-        # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_output = torch.matmul(attn_weights, value_states)
 
@@ -336,26 +297,23 @@ class ParallelLlamaAttention(nn.Module):
         attn_output = self.o_proj(attn_output)[0]
         return attn_output
 
-
 """
 Remove padding Attention
 - Using Flash-attn 2
 - Compatible with sequence parallel
 """
 
-
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_varlen_func
-    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
-
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
 
 def apply_rotary_pos_emb_rmpad(q, k, cos, sin, position_ids, indices, sequence_length):
     batch_size = position_ids.shape[0]
 
-    q = pad_input(q, indices, batch_size, sequence_length)  # (batch_size, seqlen, num_head, head_dim)
+    q = pad_input(q, indices, batch_size, sequence_length)
     k = pad_input(k, indices, batch_size, sequence_length)
-    cos = cos[position_ids].unsqueeze(2)  # [bs, seq_len, 1, dim]
-    sin = sin[position_ids].unsqueeze(2)  # [bs, seq_len, 1, dim]
+    cos = cos[position_ids].unsqueeze(2)
+    sin = sin[position_ids].unsqueeze(2)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
 
@@ -364,9 +322,6 @@ def apply_rotary_pos_emb_rmpad(q, k, cos, sin, position_ids, indices, sequence_l
 
     return q_embed, k_embed
 
-
-# use flash-attn rotary embeddings with rmpad
-# cos/sin shoudl be: (seq_length, rotary_dim / 2)
 def apply_rotary_pos_emb_rmpad_flash(q, k, cos, sin, cu_seqlens, max_seqlen):
     q_embed = apply_rotary_emb(
         q, cos, sin, interleaved=False, inplace=False, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
@@ -375,7 +330,6 @@ def apply_rotary_pos_emb_rmpad_flash(q, k, cos, sin, cu_seqlens, max_seqlen):
         k, cos, sin, interleaved=False, inplace=False, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
     )
     return q_embed, k_embed
-
 
 class ParallelLlamaAttentionRmPad(ParallelLlamaAttention):
     def forward(
@@ -387,7 +341,7 @@ class ParallelLlamaAttentionRmPad(ParallelLlamaAttention):
         cu_seqlens: torch.Tensor = None,
         max_seqlen_in_batch: int = None,
     ):
-        total_nnz, _, _ = hidden_states.size()  # This is the total_nnz padded after sequence parallel
+        total_nnz, _, _ = hidden_states.size()
 
         if self.megatron_config.sequence_parallel:
             total_nnz = total_nnz * mpu.get_tensor_model_parallel_world_size()
@@ -395,40 +349,27 @@ class ParallelLlamaAttentionRmPad(ParallelLlamaAttention):
         qkv = self.qkv_proj(hidden_states)[0]
         query_states, key_states, value_states = qkv.split(
             [self.q_size, self.k_size, self.v_size], dim=-1
-        )  # (total_nnz, 1, hidden_size)
+        )
 
         if self.megatron_config.sequence_parallel:
             sequence_parallel_pad = total_nnz - cu_seqlens[-1]
-            total_nnz = cu_seqlens[-1]  # total_nnz before sp padding
+            total_nnz = cu_seqlens[-1]
             query_states = query_states[:total_nnz]
             key_states = key_states[:total_nnz]
             value_states = value_states[:total_nnz]
 
-        # Flash attention requires the input to have the shape
-        # batch_size x seq_length x head_dime x hidden_dim
-        # therefore we just need to keep the original shape
         query_states = query_states.view(total_nnz, self.num_heads_per_tp, self.head_dim)
         key_states = key_states.view(total_nnz, self.num_key_value_heads_per_tp, self.head_dim)
         value_states = value_states.view(total_nnz, self.num_key_value_heads_per_tp, self.head_dim)
 
         cos, sin = self.rotary_emb(value_states, seq_len=sequence_length)
-        cos, sin = cos[:, : cos.shape[1] // 2], sin[:, : sin.shape[1] // 2]  # flash attn only needs half
+        cos, sin = cos[:, : cos.shape[1] // 2], sin[:, : sin.shape[1] // 2]
         query_states, key_states = apply_rotary_pos_emb_rmpad_flash(
             query_states, key_states, cos, sin, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen_in_batch
         )
-        # query_states, key_states = apply_rotary_pos_emb_rmpad(query_states, key_states, cos, sin,
-        # position_ids, indices,
 
-        # TODO: llama does not have dropout in the config??
-        # It is recommended to use dropout with FA according to the docs
-        # when training.
-        dropout_rate = 0.0  # if not self.training else self.attn_dropout
+        dropout_rate = 0.0
 
-        # In PEFT, usually we cast the layer norms in float32 for training stability reasons
-        # therefore the input hidden states gets silently casted in float32. Hence, we need
-        # cast them back in float16 just to be sure everything works as expected.
-        # This might slowdown training & inference so it is recommended to not cast the LayerNorms
-        # in fp32. (LlamaRMSNorm handles it correctly)
         input_dtype = query_states.dtype
         if input_dtype == torch.float32:
             query_states = query_states.to(torch.float16)
@@ -451,8 +392,6 @@ class ParallelLlamaAttentionRmPad(ParallelLlamaAttention):
         attn_output_unpad = attn_output_unpad.to(input_dtype)
         attn_output_unpad = attn_output_unpad.reshape(total_nnz, 1, self.hidden_size_per_tp).contiguous()
 
-        # sequence parallel reduce_scatter is performed inside RowColumnParallel if enabled
-        # Here we need to repad
         if self.megatron_config.sequence_parallel:
             attn_output_unpad = F.pad(attn_output_unpad, pad=(0, 0, 0, 0, 0, sequence_parallel_pad))
 

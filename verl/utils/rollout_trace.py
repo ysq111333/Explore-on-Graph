@@ -1,16 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import asyncio
 import contextlib
@@ -19,20 +7,7 @@ import inspect
 import os
 from typing import Optional
 
-
 class RolloutTraceConfig:
-    """Configuration for rollout tracing with various backends.
-
-    Singleton configuration class for managing rollout trace settings across different
-    tracing backends like Weave and MLflow.
-
-    Args:
-        backend (Optional[str]): Tracing backend to use ('weave', 'mlflow', or None).
-        client (Optional[object]): Client instance for the selected backend.
-        token2text (bool): Whether to convert tokens to text in traces. Defaults to False.
-        project_name (str): Name of the project for tracing.
-        experiment_name (str): Name of the experiment for tracing.
-    """
 
     _instance: Optional["RolloutTraceConfig"] = None
     backend: Optional[str] = None
@@ -100,10 +75,8 @@ class RolloutTraceConfig:
     def reset(cls):
         cls._instance = None
 
-
 @contextlib.contextmanager
 def rollout_trace_attr(sample_index=None, step=None, rollout_n=None, name="rollout_trace", validate=False):
-    """A context manager to add attributes to a trace for the configured backend."""
     backend = RolloutTraceConfig.get_backend()
     attributes = {}
     if backend:
@@ -135,7 +108,6 @@ def rollout_trace_attr(sample_index=None, step=None, rollout_n=None, name="rollo
             yield
     else:
         yield
-
 
 def rollout_trace_op(func):
     @functools.wraps(func)

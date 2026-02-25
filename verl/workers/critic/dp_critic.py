@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Implement a multiprocess PPOCritic
-"""
+
 
 import logging
 import os
@@ -42,7 +27,6 @@ elif is_npu_available:
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
 class DataParallelPPOCritic(BasePPOCritic):
     def __init__(self, config, critic_module: nn.Module, critic_optimizer: optim.Optimizer):
         super().__init__(config=config)
@@ -64,60 +48,56 @@ class DataParallelPPOCritic(BasePPOCritic):
                 )
 
         with torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
+
             input_ids = micro_batch["input_ids"]
             batch, seqlen = input_ids.shape
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
-            if position_ids.dim() == 3:  # qwen2vl mrope
+            if position_ids.dim() == 3:
                 position_ids = position_ids.transpose(0, 1)
 
             if self.use_remove_padding:
                 input_ids_rmpad, indices, *_ = unpad_input(
                     input_ids.unsqueeze(-1), attention_mask
-                )  # input_ids_rmpad (total_nnz, ...)
-                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+                )
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)
 
-                # unpad the position_ids to align the rotary
                 if position_ids.dim() == 3:
                     position_ids_rmpad = (
                         index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices)
                         .transpose(0, 1)
                         .unsqueeze(1)
-                    )  # (3, bsz, seqlen) -> (3, 1, bsz * seqlen)
+                    )
                 else:
                     position_ids_rmpad = index_first_axis(
                         rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
                     ).transpose(0, 1)
 
-                # pad and slice the inputs if sp > 1
                 if self.ulysses_sequence_parallel_size > 1:
                     input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
                         input_ids_rmpad, position_ids_rmpad, sp_size=self.ulysses_sequence_parallel_size
                     )
 
-                # only pass input_ids and position_ids to enable flash_attn_varlen
                 output = self.critic_module(
                     input_ids=input_ids_rmpad,
                     attention_mask=None,
                     position_ids=position_ids_rmpad,
                     **multi_modal_inputs,
                     use_cache=False,
-                )  # prevent model thinks we are generating
+                )
 
                 if hasattr(self.critic_module, "v_head"):
-                    # For trl.AutoModelForCausalLMWithValueHead
+
                     values_rmpad = output[2].squeeze(0).unsqueeze(-1)
                 else:
                     values_rmpad = output.logits
-                    values_rmpad = values_rmpad.squeeze(0)  # (total_nnz)
+                    values_rmpad = values_rmpad.squeeze(0)
 
-                # gather output if sp > 1
                 if self.ulysses_sequence_parallel_size > 1:
                     values_rmpad = gather_outputs_and_unpad(
                         values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size
                     )
 
-                # pad it back
                 values = pad_input(values_rmpad, indices=indices, batch=batch, seqlen=seqlen).squeeze(-1)
                 values = values[:, -response_length - 1 : -1]
             else:
@@ -127,9 +107,9 @@ class DataParallelPPOCritic(BasePPOCritic):
                     position_ids=position_ids,
                     **multi_modal_inputs,
                     use_cache=False,
-                )  # prevent model thinks we are generating
+                )
                 if hasattr(self.critic_module, "v_head"):
-                    # For trl.AutoModelForCausalLMWithValueHead
+
                     values = output[2]
                 else:
                     values = output.logits
@@ -146,7 +126,6 @@ class DataParallelPPOCritic(BasePPOCritic):
         else:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.critic_module.parameters(), max_norm=self.config.grad_clip)
 
-        # if grad_norm is not finite, skip the update
         if not torch.isfinite(grad_norm):
             print(f"WARN: grad_norm is not finite: {grad_norm}")
             self.critic_optimizer.zero_grad()
@@ -183,12 +162,12 @@ class DataParallelPPOCritic(BasePPOCritic):
             values = restore_dynamic_batch(values, batch_idx_list)
 
         response_mask = data.batch["response_mask"]
-        values = values * response_mask  # Only action tokens have values
+        values = values * response_mask
         return values
 
     @GPUMemoryLogger(role="dp critic", logger=logger)
     def update_critic(self, data: DataProto):
-        # make sure we are in training mode
+
         self.critic_module.train()
         metrics = {}
 
@@ -198,8 +177,6 @@ class DataParallelPPOCritic(BasePPOCritic):
 
         data = data.select(batch_keys=select_keys, non_tensor_batch_keys=non_tensor_select_keys)
 
-        # Split to make minibatch iterator for updating the actor
-        # See PPO paper for details. https://arxiv.org/abs/1707.06347
         mini_batches = data.split(self.config.ppo_mini_batch_size)
 
         for _ in range(self.config.ppo_epochs):
@@ -232,7 +209,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                         loss_agg_mode=self.config.loss_agg_mode,
                     )
                     if self.config.use_dynamic_bsz:
-                        # relative to the dynamic bsz
+
                         loss = vf_loss * (response_mask.shape[0] / self.config.ppo_mini_batch_size)
                     else:
                         loss = vf_loss / self.gradient_accumulation

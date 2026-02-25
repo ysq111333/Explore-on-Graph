@@ -1,17 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import torch
 from megatron.core import parallel_state as mpu
@@ -19,16 +6,9 @@ from megatron.core.packed_seq_params import PackedSeqParams
 
 from verl.utils.model import CausalLMOutputForPPO
 
-
 def preprocess_packed_seqs(
     input_ids: torch.Tensor, attention_mask: torch.Tensor, pre_process: bool = True
 ) -> tuple[torch.Tensor, PackedSeqParams]:
-    """
-    Preprocess packed sequences
-    CP splits sequence into CP*2 chunks, and each GPU gets 2 chunks (GPU0 gets first and last chunks, GPU1
-    gets second and second last chunks, and so on), this is for load balancing with causal masking.
-    See https://github.com/NVIDIA/TransformerEngine/issues/1368
-    """
     batch_size = input_ids.shape[0]
 
     seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
@@ -57,7 +37,7 @@ def preprocess_packed_seqs(
             seqlen = seqlens_in_batch_padded[i] // cp_size
             half_seqlen = seqlen // 2
             start_idx = cu_seqlens_padded[i] // cp_size
-            # split to 2 chunks
+
             d = input_ids[i, attention_mask[i]]
             input_ids_rmpad[start_idx : start_idx + half_seqlen] = d[
                 half_seqlen * cp_rank : half_seqlen * (cp_rank + 1)
@@ -86,7 +66,6 @@ def preprocess_packed_seqs(
     else:
         return input_ids, packed_seq_params
 
-
 def postprocess_packed_seqs(
     output: torch.Tensor,
     packed_seq_params: PackedSeqParams,
@@ -95,19 +74,15 @@ def postprocess_packed_seqs(
     seq_len: int,
     post_process: bool = True,
 ) -> torch.Tensor:
-    """
-    Postprocess packed sequences
-    """
     if not post_process:
         return output
-    shape = [batch_size, seq_len] + list(output.shape[2:])  # 1,packed, dim -> batch_size, seq_len, dim
+    shape = [batch_size, seq_len] + list(output.shape[2:])
     output_new = torch.zeros(shape, dtype=output.dtype, device=output.device)
 
     cp_size = mpu.get_context_parallel_world_size()
-    # all gather output across context parallel group
+
     if cp_size > 1:
-        # output shape: [1, packed_len, hidden_dim]
-        # need to gather across cp group and concatenate in sequence dimension
+
         output_list = [torch.empty_like(output) for _ in range(cp_size)]
         torch.distributed.all_gather(output_list, output.detach(), group=mpu.get_context_parallel_group())
         output_list[mpu.get_context_parallel_rank()] = output
@@ -129,7 +104,7 @@ def postprocess_packed_seqs(
         tmp = torch.empty(s_len_padded, *output.shape[2:], device=output.device)
         for j in range(cp_size):
             o = output_list[j][0]
-            # split to 2 chunks
+
             packed_start_idx = packed_seq_params.cu_seqlens_q_padded[i] // cp_size
             o0, o1 = (
                 o[packed_start_idx : packed_start_idx + half_seqlen],
@@ -141,7 +116,6 @@ def postprocess_packed_seqs(
 
     return output_new
 
-
 def remove_left_padding(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
@@ -149,16 +123,12 @@ def remove_left_padding(
     sequence_parallel: bool = False,
     pre_process: bool = True,
 ):
-    """
-    Remove left padding from input_ids, attention_mask and position_ids
-    return new_input_ids, new_attention_mask, new_position_ids
-    """
     assert attention_mask.ndim == 2
     assert position_ids.ndim == 2
     cp_size = mpu.get_context_parallel_world_size()
     assert cp_size == 1, "Context parallel size without seq_pack is not supported"
     batch_size = input_ids.shape[0]
-    shape = list(input_ids.shape)  # batch_size, seq_len,...
+    shape = list(input_ids.shape)
     seq_lens = attention_mask.sum(dim=1)
     seq_len = seq_lens.max().item()
     if sequence_parallel:
@@ -182,7 +152,6 @@ def remove_left_padding(
     else:
         return input_ids, new_attention_mask, new_position_ids
 
-
 def recover_left_padding(
     result,
     attention_mask: torch.Tensor,
@@ -190,10 +159,6 @@ def recover_left_padding(
     origin_seqlen: int,
     post_process: bool = True,
 ):
-    """
-    Recover left padding from result
-    return result
-    """
     if not post_process:
         return result
     shape = list(result.shape)
@@ -204,7 +169,6 @@ def recover_left_padding(
         new_result[i, original_attention_mask[i]] = result[i, attention_mask[i]]
     return new_result
 
-
 def postprocess_packed_seqs_for_dict_output(
     labels_mask: torch.Tensor,
     output: CausalLMOutputForPPO,
@@ -214,19 +178,6 @@ def postprocess_packed_seqs_for_dict_output(
     seq_len: int,
     post_process: bool = True,
 ) -> dict[str, torch.Tensor]:
-    """_summary_
-    For fused kernels, the output is a dictionary with keys like 'log_probs', 'entropy', etc.
-    This function post-processes each tensor in the output dictionary.
-    Args:
-        output (CausalLMOutputForPPO): _description_
-        packed_seq_params (PackedSeqParams): _description_
-        attention_mask (torch.Tensor): _description_
-        batch_size (int): _description_
-        seq_len (int): _description_
-        post_process (bool, optional): _description_. Defaults to True.
-    Returns:
-        CausalLMOutputForPPO: _description_
-    """
     ret = {}
     output.entropy = output.entropy.view(1, -1)
     output.log_probs = output.log_probs.view(1, -1)

@@ -1,16 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import asyncio
 import json
@@ -23,7 +11,6 @@ from fastmcp.client.transports import SSETransport
 from verl.tools.utils.mcp_clients.utils import TokenBucket, mcp2openai
 
 logger = logging.getLogger(__name__)
-
 
 class MCPClientManager:
     rootServerName = "mcpServers"
@@ -51,12 +38,11 @@ class MCPClientManager:
         if exclude_sse_servers[self.rootServerName]:
             self.clients.append(Client(exclude_sse_servers))
 
-        # Initialize rate limiter
         self.rate_limiter = TokenBucket(rate_limit)
         self.initialized = True
 
     async def call_tool(self, tool_name, parameters, timeout):
-        # Apply rate limiting
+
         while not self.rate_limiter.acquire():
             await asyncio.sleep(0.1)
 
@@ -92,6 +78,5 @@ class MCPClientManager:
             logger.error(f'there was an error reading the "{file}" file')
 
         return {}
-
 
 ClientManager = MCPClientManager()

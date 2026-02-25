@@ -1,24 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Test for using ray collective group.
-Suppose we Actor and Rollout. Actor contains 4 workers and Rollout contains 2 workers. We established a Worker to
-Rollout relationship by using collective groups
-Actor: rank 0, 1 - Rollout rank 0
-Rollout rank 2, 3 - Rollout rank 1
-Then, we initiate 4 p2p comms from actor to rollout
-"""
+
 
 import ray
 import ray.util.collective as collective
@@ -27,7 +7,6 @@ import torch
 from verl.single_controller.base import Worker
 from verl.single_controller.base.decorator import Dispatch, register
 from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
-
 
 @ray.remote
 class Actor(Worker):
@@ -41,7 +20,6 @@ class Actor(Worker):
     def send_tensors(self):
         tensor = torch.ones(size=(4,), dtype=torch.float32, device="cuda") * self.rank
         collective.send(tensor=tensor, dst_rank=1, group_name=self.group_name)
-
 
 @ray.remote
 class Rollout(Worker):
@@ -67,7 +45,6 @@ class Rollout(Worker):
     def get_tensors(self):
         return {f"src_{self.remote_first_rank}": self.tensor1, f"src_{self.remote_second_rank}": self.tensor2}
 
-
 def test_ray_collective_group():
     ray.init()
 
@@ -90,7 +67,6 @@ def test_ray_collective_group():
     out1 = actor_wg.send_tensors()
     out2 = rollout_wg.receive_tensors()
 
-    # block to wait
     ray.get(out1)
     ray.get(out2)
 
@@ -107,7 +83,6 @@ def test_ray_collective_group():
         assert torch.sum(output[f"src_{i}"]).item() == 4 * i
 
     ray.shutdown()
-
 
 if __name__ == "__main__":
     test_ray_collective_group()

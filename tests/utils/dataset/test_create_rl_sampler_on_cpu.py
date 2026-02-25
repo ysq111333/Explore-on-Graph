@@ -1,19 +1,4 @@
-# Copyright 2025 Amazon.com Inc and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-test create_rl_sampler
-"""
+
 
 from collections.abc import Sized
 
@@ -24,7 +9,6 @@ from torch.utils.data import Dataset, RandomSampler
 
 from verl.experimental.dataset.sampler import AbstractCurriculumSampler
 from verl.trainer.main_ppo import create_rl_sampler
-
 
 class RandomCurriculumSampler(AbstractCurriculumSampler):
     def __init__(
@@ -46,13 +30,10 @@ class RandomCurriculumSampler(AbstractCurriculumSampler):
     def update(self, batch) -> None:
         return
 
-
 class MockIncorrectSampler:
-    """A fake sampler class that does not adhere to the AbstractCurriculumSampler interface."""
 
     def __init__(self, data_source, data_config):
         pass
-
 
 class MockChatDataset(Dataset):
     def __init__(self):
@@ -73,7 +54,6 @@ class MockChatDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-
 def test_create_custom_curriculum_samper():
     data_config = OmegaConf.create(
         {
@@ -87,9 +67,7 @@ def test_create_custom_curriculum_samper():
 
     dataset = MockChatDataset()
 
-    # doesn't raise
     create_rl_sampler(data_config, dataset)
-
 
 def test_create_custom_curriculum_samper_wrong_class():
     data_config = OmegaConf.create(
@@ -103,6 +81,5 @@ def test_create_custom_curriculum_samper_wrong_class():
 
     dataset = MockChatDataset()
 
-    # MockIncorrectSampler is not an instance of AbstractCurriculumSampler, so raises
     with pytest.raises(AssertionError):
         create_rl_sampler(data_config, dataset)

@@ -1,17 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2023-2024 SGLang Team
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import json
 import logging
@@ -23,13 +10,12 @@ from typing import Any, Optional
 
 import requests
 
-DEFAULT_TIMEOUT = 30  # Default search request timeout
+DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 10
 INITIAL_RETRY_DELAY = 1
 API_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
-
 
 def call_search_api(
     retrieval_service_url: str,
@@ -38,22 +24,6 @@ def call_search_api(
     return_scores: bool = True,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """
-    Calls the remote search API to perform retrieval with retry logic for various errors,
-    using increasing delay between retries. Logs internal calls with a unique ID.
-
-    Args:
-        retrieval_service_url: The URL of the retrieval service API.
-        query_list: List of search queries.
-        topk: Number of top results to return.
-        return_scores: Whether to return scores.
-        timeout: Request timeout in seconds.
-
-    Returns:
-        A tuple (response_json, error_message).
-        If successful, response_json is the API's returned JSON object, error_message is None.
-        If failed after retries, response_json is None, error_message contains the error information.
-    """
     request_id = str(uuid.uuid4())
     log_prefix = f"[Search Request ID: {request_id}] "
 
@@ -75,7 +45,6 @@ def call_search_api(
                 timeout=timeout,
             )
 
-            # Check for Gateway Timeout (504) and other server errors for retrying
             if response.status_code in [500, 502, 503, 504]:
                 last_error = (
                     f"{log_prefix}API Request Error: Server Error ({response.status_code}) on attempt "
@@ -88,10 +57,8 @@ def call_search_api(
                     time.sleep(delay)
                 continue
 
-            # Check for other HTTP errors (e.g., 4xx)
             response.raise_for_status()
 
-            # If successful (status code 2xx)
             logger.info(f"{log_prefix}Search API call successful on attempt {attempt + 1}")
             return response.json(), None
 
@@ -113,22 +80,19 @@ def call_search_api(
             continue
         except requests.exceptions.RequestException as e:
             last_error = f"{log_prefix}API Request Error: {e}"
-            break  # Exit retry loop on other request errors
+            break
         except json.JSONDecodeError as e:
             raw_response_text = response.text if "response" in locals() else "N/A"
             last_error = f"{log_prefix}API Response JSON Decode Error: {e}, Response: {raw_response_text[:200]}"
-            break  # Exit retry loop on JSON decode errors
+            break
         except Exception as e:
             last_error = f"{log_prefix}Unexpected Error: {e}"
-            break  # Exit retry loop on other unexpected errors
+            break
 
-    # If loop finishes without returning success, return the last recorded error
     logger.error(f"{log_prefix}Search API call failed. Last error: {last_error}")
     return None, last_error.replace(log_prefix, "API Call Failed: ") if last_error else "API Call Failed after retries"
 
-
 def _passages2string(retrieval_result):
-    """Convert retrieval results to formatted string."""
     format_reference = ""
     for idx, doc_item in enumerate(retrieval_result):
         content = doc_item["document"]["contents"]
@@ -137,7 +101,6 @@ def _passages2string(retrieval_result):
         format_reference += f"Doc {idx + 1} (Title: {title})\n{text}\n\n"
     return format_reference.strip()
 
-
 def perform_single_search_batch(
     retrieval_service_url: str,
     query_list: list[str],
@@ -145,21 +108,6 @@ def perform_single_search_batch(
     concurrent_semaphore: Optional[threading.Semaphore] = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> tuple[str, dict[str, Any]]:
-    """
-    Performs a single batch search for multiple queries (original search tool behavior).
-
-    Args:
-        retrieval_service_url: The URL of the retrieval service API.
-        query_list: List of search queries.
-        topk: Number of top results to return.
-        concurrent_semaphore: Optional semaphore for concurrency control.
-        timeout: Request timeout in seconds.
-
-    Returns:
-        A tuple (result_text, metadata).
-        result_text: The search result JSON string.
-        metadata: Metadata dictionary for the batch search.
-    """
     logger.info(f"Starting batch search for {len(query_list)} queries.")
 
     api_response = None

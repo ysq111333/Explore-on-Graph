@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 import random
@@ -24,21 +12,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from verl.utils.device import get_device_name, get_torch_device
 
-
 class BaseCheckpointManager:
-    """
-    A checkpoint manager that saves and loads
-    - model
-    - optimizer
-    - lr_scheduler
-    - extra_states
-    in a SPMD way.
-
-    We save
-    - sharded model states and optimizer states
-    - full lr_scheduler states
-    - huggingface tokenizer and config for ckpt merge
-    """
 
     def __init__(
         self,
@@ -70,52 +44,30 @@ class BaseCheckpointManager:
 
     @property
     def should_save_model(self) -> bool:
-        """
-        Returns True if 'model' is in checkpoint_save_contents, indicating the model state should be saved.
-        """
         return "model" in self.checkpoint_save_contents
 
     @property
     def should_save_optimizer(self) -> bool:
-        """
-        Returns True if 'optimizer' is in checkpoint_save_contents, indicating the optimizer state should be saved.
-        """
         return "optimizer" in self.checkpoint_save_contents
 
     @property
     def should_save_extra(self) -> bool:
-        """
-        Returns True if 'extra' is in checkpoint_save_contents, indicating the extra state should be saved.
-        """
         return "extra" in self.checkpoint_save_contents
 
     @property
     def should_save_hf_model(self) -> bool:
-        """
-        Returns True if 'hf_model' is in checkpoint_save_contents, indicating the model should be converted to hf
-        model and saved.
-        """
         return "hf_model" in self.checkpoint_save_contents
 
     @property
     def should_load_model(self) -> bool:
-        """
-        Returns True if 'model' is in checkpoint_load_contents, indicating the model state should be loaded.
-        """
         return "model" in self.checkpoint_load_contents
 
     @property
     def should_load_optimizer(self) -> bool:
-        """
-        Returns True if 'optimizer' is in checkpoint_load_contents, indicating the optimizer state should be loaded.
-        """
         return "optimizer" in self.checkpoint_load_contents
 
     @property
     def should_load_extra(self) -> bool:
-        """
-        Returns True if 'extra' is in checkpoint_load_contents, indicating the extra state should be loaded.
-        """
         return "extra" in self.checkpoint_load_contents
 
     def load_checkpoint(self, local_path: str, hdfs_path: str = None, del_local_after_load: bool = False):
@@ -163,20 +115,7 @@ class BaseCheckpointManager:
         if get_device_name() != "cpu":
             get_torch_device().set_rng_state(rng_state[get_device_name()])
 
-
 def find_latest_ckpt_path(path, directory_format="global_step_{}"):
-    """
-    Return the most recent checkpoint directory based on a tracker file.
-
-    Args:
-        path (str): Base directory containing the checkpoint tracker.
-        directory_format (str): Template for checkpoint subfolders with one
-            placeholder for the iteration number (default "global_step_{}").
-
-    Returns:
-        str or None: Full path to the latest checkpoint directory, or
-        None if the tracker or checkpoint folder is missing.
-    """
     if path is None:
         return None
 
@@ -195,25 +134,12 @@ def find_latest_ckpt_path(path, directory_format="global_step_{}"):
     print("Found checkpoint: %s", ckpt_path)
     return ckpt_path
 
-
 def get_checkpoint_tracker_filename(root_path: str):
-    """
-    Tracker file rescords the latest chckpoint during training to restart from.
-    """
     return os.path.join(root_path, "latest_checkpointed_iteration.txt")
 
-
 def should_save_ckpt_esi(max_steps_duration: float, save_ckpt_duration: float = 60, redundant_time: float = 0) -> bool:
-    """
-    Determine if checkpoint should be saved based on capacity esi expiration.
-
-    Args:
-        max_steps_duration: Max estimated time (seconds) required to complete one training step
-        save_ckpt_duration: Estimated time (seconds) required to save checkpoint (default: 60)
-        redundant_time: Additional buffer time (seconds) for unexpected delays (default: 0)
-    """
-    exp_ts_mlp = os.getenv("MLP_CURRENT_CAPACITY_BLOCK_EXPIRATION_TIMESTAMP")  # vemlp
-    exp_ts_aws = os.getenv("SAGEMAKER_CURRENT_CAPACITY_BLOCK_EXPIRATION_TIMESTAMP")  # aws
+    exp_ts_mlp = os.getenv("MLP_CURRENT_CAPACITY_BLOCK_EXPIRATION_TIMESTAMP")
+    exp_ts_aws = os.getenv("SAGEMAKER_CURRENT_CAPACITY_BLOCK_EXPIRATION_TIMESTAMP")
     if exp_ts_mlp:
         try:
             import time

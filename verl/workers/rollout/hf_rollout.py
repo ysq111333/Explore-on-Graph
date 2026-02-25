@@ -1,22 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Rollout with huggingface models.
-TODO: refactor this class. Currently, it will hang when using FSDP HybridShard. We should actually create a single
-GPU model. Then, get full state_dict and bind the state_dict to the single GPU model. Then, use the single GPU model
-to perform generation.
-"""
+
 
 import contextlib
 
@@ -35,7 +17,6 @@ from .base import BaseRollout
 
 __all__ = ["HFRollout"]
 
-
 class HFRollout(BaseRollout):
     def __init__(self, module: nn.Module, config):
         super().__init__()
@@ -52,33 +33,33 @@ class HFRollout(BaseRollout):
 
     @torch.no_grad()
     def _generate_minibatch(self, prompts: DataProto) -> DataProto:
-        # make sampling args can be overridden by inputs
+
         do_sample = prompts.meta_info.get("do_sample", self.config.do_sample)
         is_validate = prompts.meta_info.get("validate", False)
 
         temperature = prompts.meta_info.get("temperature", self.config.temperature)
         response_length = prompts.meta_info.get("response_length", self.config.response_length)
         top_p = prompts.meta_info.get("top_p", self.config.get("top_p", 1.0))
-        top_k = max(0, prompts.meta_info.get("top_k", self.config.get("top_k", 0)))  # to be compatible with vllm
+        top_k = max(0, prompts.meta_info.get("top_k", self.config.get("top_k", 0)))
 
         if not do_sample:
-            # do_sample==False -> greedy decoding
+
             kwargs = {
                 "do_sample": False,
                 "num_beams": 1,
             }
         elif is_validate:
-            # do validate and do sample -> use val_kwargs
+
             kwargs = {
                 "do_sample": True,
                 "num_beams": 1,
-                "top_k": max(0, self.config.val_kwargs.top_k),  # to be compatible with vllm
+                "top_k": max(0, self.config.val_kwargs.top_k),
                 "top_p": self.config.val_kwargs.top_p,
                 "temperature": self.config.val_kwargs.temperature,
-                "num_return_sequences": 1,  # if validate, already repeat in ray_trainer
+                "num_return_sequences": 1,
             }
         else:
-            # do_sample -> use rollout config
+
             kwargs = {
                 "do_sample": True,
                 "num_beams": 1,
@@ -88,15 +69,13 @@ class HFRollout(BaseRollout):
                 "num_return_sequences": self.config.n,
             }
 
-        # make config according to generate mode
         generation_config = GenerationConfig(**kwargs)
 
-        idx = prompts.batch["input_ids"]  # (bs, prompt_length)
+        idx = prompts.batch["input_ids"]
         prompt_length = idx.size(1)
-        attention_mask = prompts.batch["attention_mask"]  # left-padded attention_mask
+        attention_mask = prompts.batch["attention_mask"]
         position_ids = prompts.batch["position_ids"]
 
-        # used to construct attention_mask
         eos_token_id = prompts.meta_info["eos_token_id"]
         pad_token_id = prompts.meta_info["pad_token_id"]
 
@@ -104,7 +83,7 @@ class HFRollout(BaseRollout):
         param_ctx = contextlib.nullcontext()
 
         if isinstance(self.module, FSDP):
-            # recurse need to set to False according to https://github.com/pytorch/pytorch/issues/100069
+
             param_ctx = FSDP.summon_full_params(self.module, writeback=False, recurse=False)
         with param_ctx, torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
             output = self.module.generate(
@@ -116,17 +95,14 @@ class HFRollout(BaseRollout):
                 eos_token_id=eos_token_id,
                 pad_token_id=pad_token_id,
                 generation_config=generation_config,
-                output_scores=False,  # this is potentially very large
+                output_scores=False,
                 return_dict_in_generate=True,
                 use_cache=True,
             )
 
-        # TODO: filter out the seq with no answers like ds-chat
         seq = output.sequences
-        generated_batch_size = seq.size(0)  # bs * num_return_sequences
+        generated_batch_size = seq.size(0)
 
-        # huggingface generate will stop generating when all the batch reaches [EOS].
-        # We have to pad to response_length
         sequence_length = prompt_length + self.config.response_length
         delta_length = sequence_length - seq.shape[1]
 
@@ -136,14 +112,13 @@ class HFRollout(BaseRollout):
             seq = torch.cat((seq, delta_tokens), dim=1)
         assert seq.shape[1] == sequence_length
 
-        # make necessary reputations if num_return_sequences > 1
         num_return_sequences = kwargs.get("num_return_sequences", 1)
         if num_return_sequences > 1:
             position_ids = position_ids.repeat_interleave(num_return_sequences, dim=0)
             attention_mask = attention_mask.repeat_interleave(num_return_sequences, dim=0)
 
-        prompt = seq[:, :prompt_length]  # (generated_batch_size, prompt_length)
-        response = seq[:, prompt_length:]  # (generated_batch_size, response_length)
+        prompt = seq[:, :prompt_length]
+        response = seq[:, prompt_length:]
 
         response_length = response.size(1)
         delta_position_id = torch.arange(1, response_length + 1, device=position_ids.device)
@@ -168,7 +143,6 @@ class HFRollout(BaseRollout):
             batch_size=generated_batch_size,
         )
 
-        # empty cache before compute old_log_prob
         get_torch_device().empty_cache()
 
         self.module.train()

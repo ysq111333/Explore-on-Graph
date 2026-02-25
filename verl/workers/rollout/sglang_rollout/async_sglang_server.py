@@ -1,17 +1,5 @@
-# Copyright 2023-2024 SGLang Team
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
+
 import asyncio
 import logging
 from typing import Any
@@ -24,7 +12,6 @@ from starlette.responses import JSONResponse
 from verl.workers.rollout.async_server import AsyncServerBase
 
 logger = logging.getLogger(__file__)
-
 
 @ray.remote(num_cpus=1)
 class AsyncSGLangServer(AsyncServerBase):
@@ -40,7 +27,7 @@ class AsyncSGLangServer(AsyncServerBase):
 
     async def init_engine(self):
         if self.workers:
-            # avoid init twice
+
             return
         all_actors = ray.util.list_named_actors(all_namespaces=True)
         matched_actors = [
@@ -61,7 +48,6 @@ class AsyncSGLangServer(AsyncServerBase):
     async def chat_completion(self, raw_request: Request):
         request = await raw_request.json()
 
-        # only send request to master worker in tp rank 0
         output_future = self.master_worker.chat_completion.remote(request)
         [outputs] = await asyncio.gather(output_future)
         return JSONResponse(outputs)

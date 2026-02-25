@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -19,12 +7,10 @@ import torch
 from transformers.cache_utils import Cache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-
 @dataclass
 class CausalLMOutputForPPO(CausalLMOutputWithPast):
     log_probs: Optional[torch.FloatTensor] = None
     entropy: Optional[torch.FloatTensor] = None
-
 
 def forward_base_model(
     self,
@@ -39,19 +25,12 @@ def forward_base_model(
     return_dict: Optional[bool] = None,
     cache_position: Optional[torch.LongTensor] = None,
 ) -> CausalLMOutputWithPast:
-    r"""
-    Copy paste LLaMa's forward
-    https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/model/llama.py
-
-    This function should be generic enough for all pure text models.
-    ```"""
 
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     output_hidden_states = (
         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
     )
 
-    # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
     outputs = self.model(
         input_ids=input_ids,
         attention_mask=attention_mask,
@@ -66,7 +45,6 @@ def forward_base_model(
     )
 
     return outputs
-
 
 def forward_with_torch_backend(
     self,
@@ -105,7 +83,6 @@ def forward_with_torch_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_torch_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:
@@ -128,7 +105,6 @@ def forward_with_torch_backend(
         hidden_states=outputs.hidden_states,
         attentions=outputs.attentions,
     )
-
 
 def forward_with_triton_backend(
     self,
@@ -168,7 +144,6 @@ def forward_with_triton_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_triton_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:

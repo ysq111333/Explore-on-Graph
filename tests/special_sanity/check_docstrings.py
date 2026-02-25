@@ -1,29 +1,10 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-"""
-Python script to check docstrings for functions and classes in specified files.
-Checks that every public function and class has proper docstring documentation.
-"""
 
 import ast
 import os
 import sys
 
-
 class DocstringChecker(ast.NodeVisitor):
-    """AST visitor to check for missing docstrings in functions and classes."""
 
     def __init__(self, filename: str):
         self.filename = filename
@@ -32,7 +13,6 @@ class DocstringChecker(ast.NodeVisitor):
         self.function_nesting_level = 0
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        """Visit function definitions and check for docstrings."""
         if not node.name.startswith("_") and self.function_nesting_level == 0:
             if not self._has_docstring(node):
                 func_name = f"{self.current_class}.{node.name}" if self.current_class else node.name
@@ -43,7 +23,6 @@ class DocstringChecker(ast.NodeVisitor):
         self.function_nesting_level -= 1
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        """Visit async function definitions and check for docstrings."""
         if not node.name.startswith("_") and self.function_nesting_level == 0:
             if not self._has_docstring(node):
                 func_name = f"{self.current_class}.{node.name}" if self.current_class else node.name
@@ -54,7 +33,6 @@ class DocstringChecker(ast.NodeVisitor):
         self.function_nesting_level -= 1
 
     def visit_ClassDef(self, node: ast.ClassDef):
-        """Visit class definitions and check for docstrings."""
         if not node.name.startswith("_"):
             if not self._has_docstring(node):
                 self.missing_docstrings.append((node.name, self.filename, node.lineno))
@@ -65,12 +43,9 @@ class DocstringChecker(ast.NodeVisitor):
         self.current_class = old_class
 
     def _has_docstring(self, node) -> bool:
-        """Check if a node has a docstring."""
         return ast.get_docstring(node) is not None
 
-
 def check_file_docstrings(filepath: str) -> list[tuple[str, str, int]]:
-    """Check docstrings in a single file."""
     try:
         with open(filepath, encoding="utf-8") as f:
             content = f.read()
@@ -84,9 +59,7 @@ def check_file_docstrings(filepath: str) -> list[tuple[str, str, int]]:
         print(f"Error processing {filepath}: {e}")
         return []
 
-
 def main():
-    """Main function to check docstrings in specified files."""
 
     files_to_check = [
         "verl/trainer/ppo/ray_trainer.py",
@@ -150,7 +123,6 @@ def main():
 
     else:
         print("\n✅ All functions and classes have proper docstrings!")
-
 
 if __name__ == "__main__":
     main()

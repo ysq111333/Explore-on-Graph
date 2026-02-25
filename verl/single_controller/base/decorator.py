@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import inspect
 from functools import wraps
@@ -19,21 +7,12 @@ from types import FunctionType
 from verl.protocol import DataProtoFuture, _padding_size_key
 from verl.utils.py_functional import DynamicEnum
 
-# here we add a magic number of avoid user-defined function already have this attribute
 MAGIC_ATTR = "attrs_3141562937"
 
-
 class Dispatch(DynamicEnum):
-    """Enum class defining different dispatch modes for distributed computation.
-
-    Each mode represents a specific strategy for distributing data across
-    different ranks in a distributed system. The modes are used to control
-    how data is partitioned and processed across different worker groups.
-    """
 
     _registry = {}
     _next_value = 0
-
 
 def init_predefined_dispatch_mode():
     Dispatch.register("RANK_ZERO")
@@ -48,30 +27,20 @@ def init_predefined_dispatch_mode():
     Dispatch.register("DP_COMPUTE_PROTO")
     Dispatch.register("DP_COMPUTE_PROTO_WITH_FUNC")
     Dispatch.register("DP_COMPUTE_METRIC")
-    # This is a special dispatch mode for vllm ExternalRayDistributedExecutor
+
     Dispatch.register("DIRECT_ROLLOUT_METHOD")
 
-
 class Execute(DynamicEnum):
-    """Enum class defining different execution modes for distributed computation.
-
-    These modes control how a function should be executed across different ranks
-    in a distributed system.
-    """
 
     _registry = {}
     _next_value = 0
-
 
 def init_predefined_execute_mode():
     Execute.register("ALL")
     Execute.register("RANK_ZERO")
 
-
-# Initialize the two Dynamic Enum Classes
 init_predefined_dispatch_mode()
 init_predefined_execute_mode()
-
 
 def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
     from verl.protocol import DataProto, DataProtoFuture
@@ -88,7 +57,6 @@ def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
 
     return splitted_args, splitted_kwargs
 
-
 def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
     from verl.protocol import DataProto, DataProtoFuture
 
@@ -99,7 +67,7 @@ def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
         nonlocal data_proto_len, padding_size
         assert isinstance(obj, DataProto | DataProtoFuture)
         if isinstance(obj, DataProto) and obj.is_padding_enabled():
-            # for padding, we only support DataProto with same length
+
             if data_proto_len is None:
                 data_proto_len = len(obj)
                 padding_size = (chunks - (data_proto_len % chunks)) if (data_proto_len % chunks > 0) else 0
@@ -117,36 +85,27 @@ def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
 
     return splitted_args, splitted_kwargs
 
-
 def dispatch_one_to_all(worker_group, *args, **kwargs):
     args = tuple([arg] * worker_group.world_size for arg in args)
     kwargs = {k: [v] * worker_group.world_size for k, v in kwargs.items()}
     return args, kwargs
 
-
 def dummy_direct_rollout_call(worker_group, *args, **kwargs):
     raise NotImplementedError("Direct rollout call is forbidden.")
-
 
 def dispatch_all_to_all(worker_group, *args, **kwargs):
     return args, kwargs
 
-
 def collect_all_to_all(worker_group, output):
     return output
 
-
 def dispatch_megatron_compute(worker_group, *args, **kwargs):
-    """
-    User passes in dp data. The data is dispatched to all tp/pp ranks with the same dp
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup), (
         f"worker_group must be MegatronWorkerGroup, Got {type(worker_group)}"
     )
 
-    # ray put all the args in advance to avoid duplicate serialization cost
     import ray
 
     args = [[ray.put(dp_arg) for dp_arg in arg] for arg in args]
@@ -165,11 +124,7 @@ def dispatch_megatron_compute(worker_group, *args, **kwargs):
 
     return all_args, all_kwargs
 
-
 def collect_megatron_compute(worker_group, output):
-    """
-    Only collect the data from the tp=0 and pp=last and every dp ranks
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup)
@@ -181,11 +136,7 @@ def collect_megatron_compute(worker_group, output):
             output_in_dp.append(output[global_rank])
     return output_in_dp
 
-
 def dispatch_megatron_compute_data_proto(worker_group, *args, **kwargs):
-    """
-    All the args and kwargs must be DataProto. The batch will be chunked by dp_size and passed to each rank
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup)
@@ -193,13 +144,11 @@ def dispatch_megatron_compute_data_proto(worker_group, *args, **kwargs):
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto(worker_group.dp_size, *args, **kwargs)
     return dispatch_megatron_compute(worker_group, *splitted_args, **splitted_kwargs)
 
-
 def _concat_data_proto_or_future(output: list):
     import ray
 
     from verl.protocol import DataProto, DataProtoFuture
 
-    # make sure all the elements in output has the same type
     for o in output:
         assert type(o) is type(output[0])
 
@@ -212,11 +161,7 @@ def _concat_data_proto_or_future(output: list):
     else:
         raise NotImplementedError
 
-
 def collect_megatron_compute_data_proto(worker_group, output):
-    """
-    Each output must be a DataProto. We concat the dim=0 of output
-    """
     import ray
 
     from verl.protocol import DataProto
@@ -227,11 +172,7 @@ def collect_megatron_compute_data_proto(worker_group, output):
 
     return _concat_data_proto_or_future(output)
 
-
 def dispatch_megatron_pp_as_dp(worker_group, *args, **kwargs):
-    """
-    treat pp as dp.
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup)
@@ -248,16 +189,7 @@ def dispatch_megatron_pp_as_dp(worker_group, *args, **kwargs):
             local_dp_rank = worker_group.get_megatron_rank_info(rank=i).dp_rank
             local_pp_rank = worker_group.get_megatron_rank_info(rank=i).pp_rank
             local_cp_rank = worker_group.get_megatron_rank_info(rank=i).cp_rank
-            # compute the rank in obj_list. Note that the order is dp then cp then pp
-            # Also note that the outputs within a pp group will be firstly allgathered, then only the
-            # output of pp0 will be collected.
-            # For pp=2 dp=4, a batch of data "ABCDEFGH" should be dispatched and collected in below order:
-            #    dispatch:       pp_allgther:        collect:
-            #   dp 0 1 2 3      dp  0  1  2  3
-            # pp +---------+  pp +-------------+
-            #  0 | A C E G |   0 | AB CD EF GH |     ABCDEFGH
-            #  1 | B D F H |   1 | AB CD EF GH |
-            #    +---------+     +-------------+
+
             dp_cp_rank = local_cp_rank * dp_size + local_dp_rank
             arg_rank = dp_cp_rank * pp_size + local_pp_rank
             transformed_data.append(obj_list[arg_rank])
@@ -268,11 +200,7 @@ def dispatch_megatron_pp_as_dp(worker_group, *args, **kwargs):
 
     return all_args, all_kwargs
 
-
 def collect_megatron_pp_as_dp(worker_group, output):
-    """
-    treat pp as dp. Only collect data on tp=0
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup)
@@ -283,11 +211,7 @@ def collect_megatron_pp_as_dp(worker_group, output):
             output_in_dp.append(output[global_rank])
     return output_in_dp
 
-
 def collect_megatron_pp_only(worker_group, output):
-    """
-    Only collect output of megatron pp. This is useful when examine weight names as they are identical in tp/dp
-    """
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
     assert isinstance(worker_group, MegatronWorkerGroup)
@@ -297,7 +221,6 @@ def collect_megatron_pp_only(worker_group, output):
         if local_rank_info.tp_rank == 0 and local_rank_info.dp_rank == 0:
             output_in_pp.append(output[global_rank])
     return output_in_pp
-
 
 def dispatch_megatron_pp_as_dp_data_proto(worker_group, *args, **kwargs):
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
@@ -309,7 +232,6 @@ def dispatch_megatron_pp_as_dp_data_proto(worker_group, *args, **kwargs):
     ret = dispatch_megatron_pp_as_dp(worker_group, *splitted_args, **splitted_kwargs)
     return ret
 
-
 def collect_megatron_pp_as_dp_data_proto(worker_group, output):
     from verl.single_controller.base.megatron.worker_group import MegatronWorkerGroup
 
@@ -317,7 +239,6 @@ def collect_megatron_pp_as_dp_data_proto(worker_group, output):
 
     output = collect_megatron_pp_as_dp(worker_group, output)
     return _concat_data_proto_or_future(output)
-
 
 def dispatch_dp_compute(worker_group, *args, **kwargs):
     from verl.single_controller.base.worker_group import WorkerGroup
@@ -329,7 +250,6 @@ def dispatch_dp_compute(worker_group, *args, **kwargs):
         assert isinstance(v, tuple | list) and len(v) == worker_group.world_size
     return args, kwargs
 
-
 def collect_dp_compute(worker_group, output):
     from verl.single_controller.base.worker_group import WorkerGroup
 
@@ -337,12 +257,11 @@ def collect_dp_compute(worker_group, output):
     assert len(output) == worker_group.world_size
     return output
 
-
 def dispatch_dp_compute_data_proto(worker_group, *args, **kwargs):
     from verl.single_controller.base.worker_group import WorkerGroup
 
     assert isinstance(worker_group, WorkerGroup)
-    # Note: enable auto padding for dp compute DatapProto
+
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto_with_auto_padding(
         worker_group.world_size,
         *args,
@@ -350,17 +269,15 @@ def dispatch_dp_compute_data_proto(worker_group, *args, **kwargs):
     )
     return splitted_args, splitted_kwargs
 
-
 def dispatch_dp_compute_data_proto_with_func(worker_group, *args, **kwargs):
     from verl.single_controller.base.worker_group import WorkerGroup
 
     assert isinstance(worker_group, WorkerGroup)
-    assert isinstance(args[0], FunctionType)  # NOTE: The first one args is a function!
+    assert isinstance(args[0], FunctionType)
 
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto(worker_group.world_size, *args[1:], **kwargs)
     splitted_args_with_func = [[args[0]] * worker_group.world_size] + splitted_args
     return splitted_args_with_func, splitted_kwargs
-
 
 def collect_dp_compute_data_proto(worker_group, output):
     import ray
@@ -373,8 +290,6 @@ def collect_dp_compute_data_proto(worker_group, output):
     output = collect_dp_compute(worker_group, output)
     return _concat_data_proto_or_future(output)
 
-
-# Global registry for dispatch mode.
 DISPATCH_MODE_FN_REGISTRY = {
     Dispatch.ONE_TO_ALL: {
         "dispatch_fn": dispatch_one_to_all,
@@ -417,41 +332,26 @@ DISPATCH_MODE_FN_REGISTRY = {
     },
 }
 
-
 def get_predefined_dispatch_fn(dispatch_mode):
     return DISPATCH_MODE_FN_REGISTRY[dispatch_mode]
 
-
 def register_dispatch_mode(dispatch_mode_name, dispatch_fn, collect_fn):
-    """
-    Register a new dispatch mode.
-    """
     dispatch_mode = Dispatch.register(dispatch_mode_name)
     _check_dispatch_mode(dispatch_mode)
     assert dispatch_mode not in DISPATCH_MODE_FN_REGISTRY, f"dispatch_mode_name {dispatch_mode_name} already exists"
     DISPATCH_MODE_FN_REGISTRY[dispatch_mode] = {"dispatch_fn": dispatch_fn, "collect_fn": collect_fn}
 
-
 def update_dispatch_mode(dispatch_mode, dispatch_fn, collect_fn):
-    """
-    Update the dispatch mode.
-    """
     _check_dispatch_mode(dispatch_mode)
     assert dispatch_mode in DISPATCH_MODE_FN_REGISTRY, f"dispatch_mode {dispatch_mode} not found"
     DISPATCH_MODE_FN_REGISTRY[dispatch_mode] = {"dispatch_fn": dispatch_fn, "collect_fn": collect_fn}
 
-
 def get_predefined_execute_fn(execute_mode):
-    """
-    Note that here we only asks execute_all and execute_rank_zero to be implemented
-    Leave the choice of how these two functions handle argument 'blocking' to users
-    """
     predefined_execute_mode_fn = {
         Execute.ALL: {"execute_fn_name": "execute_all"},
         Execute.RANK_ZERO: {"execute_fn_name": "execute_rank_zero"},
     }
     return predefined_execute_mode_fn[execute_mode]
-
 
 def _check_dispatch_mode(dispatch_mode):
     assert isinstance(dispatch_mode, Dispatch | dict), (
@@ -462,17 +362,15 @@ def _check_dispatch_mode(dispatch_mode):
         for key in necessary_keys:
             assert key in dispatch_mode, f"key {key} should be in dispatch_mode if it is a dictionary"
 
-
 def _check_execute_mode(execute_mode):
     assert isinstance(execute_mode, Execute), f"execute_mode must be a Execute. Got {execute_mode}"
-
 
 def _materialize_futures(*args, **kwargs):
     new_args = []
     for arg in args:
         if isinstance(arg, DataProtoFuture):
             arg = arg.get()
-        # add more type to materialize
+
         new_args.append(arg)
     for k, v in kwargs.items():
         if isinstance(v, DataProtoFuture):
@@ -481,28 +379,7 @@ def _materialize_futures(*args, **kwargs):
     new_args = tuple(new_args)
     return new_args, kwargs
 
-
 def register(dispatch_mode=Dispatch.ALL_TO_ALL, execute_mode=Execute.ALL, blocking=True, materialize_futures=True):
-    """Register a function with distributed execution configuration.
-
-    This decorator registers a function with specific dispatch and execution modes
-    for distributed computation. It handles both synchronous and asynchronous
-    functions, and optionally materializes futures before execution.
-
-    Args:
-        dispatch_mode:
-            Dispatch mode for computation distribution. Default: Dispatch.ALL_TO_ALL.
-        execute_mode:
-            Execute mode for computation distribution. Default: Execute.ALL.
-        blocking:
-            Whether the execution should be blocking. Defaults to True.
-        materialize_futures:
-            Whether to materialize the data before dispatching. Defaults to True.
-
-    Returns:
-        A decorator that wraps the original function with distributed execution
-        configuration.
-    """
     _check_dispatch_mode(dispatch_mode=dispatch_mode)
     _check_execute_mode(execute_mode=execute_mode)
 

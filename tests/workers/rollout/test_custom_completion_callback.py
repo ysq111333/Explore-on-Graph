@@ -1,16 +1,5 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
+
 import asyncio
 import concurrent.futures
 import os
@@ -37,20 +26,13 @@ from verl.utils import hf_tokenizer
 from verl.utils.reward_score.sandbox_fusion.utils import _process_single_case
 from verl.workers.rollout.chat_scheduler import ChatCompletionScheduler, ToolCompletionCallback
 
-
 def _get_free_port():
     with socket.socket() as sock:
         sock.bind(("", 0))
         return sock.getsockname()[1]
 
-
 @ray.remote(num_cpus=1)
 class Sandbox:
-    """Sandbox to execute python code.
-
-    WARNING: This class is for testing purpose only, do not use it in production.
-    Please use a sandbox with strong isolation and security restrictions instead.
-    """
 
     def __init__(self):
         self.address = ray.util.get_node_ip_address()
@@ -87,7 +69,7 @@ class Sandbox:
         finally:
             try:
                 os.unlink(temp_file)
-            except:  # noqa: E722
+            except:
                 pass
 
     async def _start_fastapi_server(self):
@@ -109,10 +91,8 @@ class Sandbox:
         await server.serve()
 
     async def get_server_address(self) -> str:
-        """Get FastAPI server address."""
         await self.server_ready.wait()
         return f"{self.address}:{self.port}"
-
 
 class CustomCompletionCallback(ToolCompletionCallback):
     def __init__(self, config: DictConfig, scheduler: ChatCompletionScheduler):
@@ -125,7 +105,7 @@ class CustomCompletionCallback(ToolCompletionCallback):
         self.sandbox_fusion_url = config.reward_model.sandbox_fusion.url
         self.default_timeout = 10
         self.memory_limit_mb = config.reward_model.sandbox_fusion.memory_limit_mb
-        # TODO: support asyncio executor
+
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(32, os.cpu_count() * 5))
 
     async def sandbox_code_execution(self, code: str) -> dict[str, Any]:
@@ -133,14 +113,14 @@ class CustomCompletionCallback(ToolCompletionCallback):
         result_status, metadata = await loop.run_in_executor(
             self.executor,
             _process_single_case,
-            0,  # case_index,
-            None,  # stdin_data,
-            None,  # expected_output,
-            self.sandbox_fusion_url,  # sandbox_fusion_url
-            code,  # generation
-            self.default_timeout,  # timeout
-            self.memory_limit_mb,  # memory limit
-            "python",  # language
+            0,
+            None,
+            None,
+            self.sandbox_fusion_url,
+            code,
+            self.default_timeout,
+            self.memory_limit_mb,
+            "python",
         )
 
         return metadata
@@ -162,29 +142,24 @@ class CustomCompletionCallback(ToolCompletionCallback):
         messages.append({"role": role, "content": content})
         turn = len(messages)
 
-        # STEP 0: check if we reach max turns
         if len(messages) >= self.max_assistant_turns:
             print(f"[id={completions.id},turn={turn},finish_reason={finish_reason}] Reach max turns, done!")
             return
 
-        # STEP 1: check if we reach max tokens
         if finish_reason == "length":
             print(f"[id={completions.id},turn={turn},finish_reason={finish_reason}] Reach max tokens, done!")
             return
 
-        # STEP 2: check if we got answer
         matches = self.answer_pattern.findall(content)
         if matches:
             print(f"[id={completions.id},turn={turn},finish_reason={finish_reason}] Got answer: {matches[0]}, done!")
             return
 
-        # STEP 3: check if we got code block
         matches = self.code_pattern.findall(content)
         if not matches:
             print(f"[id={completions.id},turn={turn},finish_reason={finish_reason}] No code block found, done!")
             return
 
-        # STEP 4: execute code block in sandbox
         code = matches[0].strip()
         metadata = await self.sandbox_code_execution(code)
         if metadata["run_status"] != "Finished":
@@ -198,13 +173,11 @@ class CustomCompletionCallback(ToolCompletionCallback):
         messages.append({"role": "tool", "content": f"<interpreter>{stdout}{stderr}</interpreter>"})
         print(f"[id={completions.id},turn={turn},finish_reason={finish_reason}] Code block executed, continue...")
 
-        # STEP 5: resubmit chat completions with code block output
         self.scheduler.submit_chat_completions(
             messages=messages,
             request_id=completions.id,
             info=info,
         )
-
 
 user_prompt_template = """
 You are a helpful assistant. Let's solve math problem in following steps:
@@ -229,7 +202,6 @@ The answer format must be: <answer>\\boxed{'The final answer goes here.'}</answe
 {question}
 """
 
-
 if __name__ == "__main__":
     ray.init(
         runtime_env={
@@ -242,7 +214,6 @@ if __name__ == "__main__":
         }
     )
 
-    # Load config
     import os
 
     from hydra import compose, initialize_config_dir
@@ -260,14 +231,12 @@ if __name__ == "__main__":
     config.actor_rollout_ref.rollout.response_length = 4096
     config.actor_rollout_ref.rollout.n = 4
 
-    # Init sandbox and async rollout manager
     sandbox = Sandbox.options(num_cpus=1).remote()
     sandbox_address = ray.get(sandbox.get_server_address.remote())
     sandbox_fusion_url = f"http://{sandbox_address}/run_code"
     config.reward_model.sandbox_fusion.url = sandbox_fusion_url
     async_rollout_manager = init_async_rollout_manager(config)
 
-    # Build dataset
     dataset = load_dataset("Maxwell-Jia/AIME_2024", split="train")
     prompts = DataProto(
         non_tensor_batch={
@@ -283,18 +252,15 @@ if __name__ == "__main__":
     result = async_rollout_manager.generate_sequences(prompts=prompts)
     assert len(result) == len(dataset) * config.actor_rollout_ref.rollout.n
 
-    # Check max turns that sandbox is called
     num_turns = result.non_tensor_batch["__num_turns__"]
     print(f"num_turns: {num_turns}")
     assert np.max(num_turns) > 2, f"max turns: {np.max(num_turns)}"
 
-    # Check response_mask
     tokenizer = hf_tokenizer(config.actor_rollout_ref.model.path)
     responses = result.batch["responses"]
     response_mask = result.batch["response_mask"]
     assert responses.size() == response_mask.size(), f"{responses.size()} != {response_mask.size()}"
 
-    # Decode responses with response_mask
     for i in range(len(responses)):
         valid_tokens = responses[i][response_mask[i].bool()]
         response_str = tokenizer.decode(valid_tokens)

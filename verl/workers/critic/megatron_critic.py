@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Implement a multiprocess PPOCritic
-"""
+
 
 import itertools
 import logging
@@ -42,7 +27,6 @@ from verl.workers.critic import BasePPOCritic
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
 class MegatronPPOCritic(BasePPOCritic):
     def __init__(
         self,
@@ -57,14 +41,13 @@ class MegatronPPOCritic(BasePPOCritic):
         super().__init__(config=config)
         self._validate_config(config)
         self.model_config = model_config
-        self.hf_config = hf_config  # huggingface config
-        self.tf_config = tf_config  # mcore transformer config
+        self.hf_config = hf_config
+        self.tf_config = tf_config
 
         self.critic_module = critic_module
         self.critic_optimizer = critic_optimizer
         self.critic_optimizer_config = critic_optimizer_config
 
-        # we create a separate nametuple for optimizer step so that global args won't affect it.
         self.optimizer_step_args = OmegaConf.create(
             {
                 "skip_grad": None,
@@ -80,7 +63,6 @@ class MegatronPPOCritic(BasePPOCritic):
         )
 
     def _validate_config(self, config) -> None:
-        """Validate config options not implemented for Megatron backend"""
         assert config.get("ulysses_sequence_parallel_size", 1) == 1
         if config.shuffle:
             assert config.data_loader_seed is not None, "If shuffle dataloader, seed must be manually set"
@@ -112,8 +94,8 @@ class MegatronPPOCritic(BasePPOCritic):
                 mini_batch_size=None,
             )
             if mpu.is_pipeline_last_stage(ignore_virtual=True):
-                # only on last rank. It should be on every tp rank
-                values = [o["vpreds"] for o in output["output"]]  # (bs, seq_size, vocal_size)
+
+                values = [o["vpreds"] for o in output["output"]]
                 values = torch.cat(values, dim=0).to(torch.float32)
                 if use_dynamic_bsz:
                     indices = output["indices"]
@@ -124,22 +106,19 @@ class MegatronPPOCritic(BasePPOCritic):
             else:
                 values = torch.empty_like(attention_mask, dtype=torch.float32)
 
-            # each tp ranks should contain the same value
             values = values[
                 :, -response_length - 1 : -1
-            ]  # Values are predicted at the ends of prefixes, e.g., the last prompt token
+            ]
             response_mask = attention_mask[:, -response_length:]
-            values = values * response_mask  # Only action tokens have values
+            values = values * response_mask
             values = values.contiguous()
 
-            # sync among pp ranks
             torch.distributed.broadcast(
                 tensor=values,
                 src=mpu.get_pipeline_model_parallel_last_rank(),
                 group=mpu.get_pipeline_model_parallel_group(),
             )
 
-        # add empty cache after each compute
         get_torch_device().empty_cache()
 
         return values
@@ -163,7 +142,7 @@ class MegatronPPOCritic(BasePPOCritic):
         max_token_len=None,
         mini_batch_size=None,
     ):
-        # broadcast from last pp rank to all other pp ranks
+
         mini_batch = data
         mini_batch.to(get_device_id())
         mini_batch.batch = mini_batch.batch.contiguous()
@@ -172,7 +151,7 @@ class MegatronPPOCritic(BasePPOCritic):
             src=mpu.get_pipeline_model_parallel_last_rank(),
             group=mpu.get_pipeline_model_parallel_group(),
         )
-        # split into micro-batches
+
         mini_batch.batch["attention_mask"] = mini_batch.batch["attention_mask"].to(bool)
 
         indices = None
@@ -220,7 +199,7 @@ class MegatronPPOCritic(BasePPOCritic):
 
             cliprange_value = self.config.cliprange_value
 
-            vpreds = output  # (bs, sequence_length)
+            vpreds = output
             vpreds = vpreds[:, -response_length - 1 : -1]
 
             vf_loss, vf_clipfrac = core_algos.compute_value_loss(
@@ -260,19 +239,16 @@ class MegatronPPOCritic(BasePPOCritic):
 
             return output, partial(loss_func, data=batch, meta_info={})
 
-        # batch should be a list of batches inside micro-batches
         batch_generator = make_batch_generator(micro_batches, vpp_size=len(self.critic_module))
 
-        # TODO: we may use the new schedule instead
-        # for flash-attn: (seq_len, batch_size, hidden_size) = (mbs*seq_len, 1, hidden_size)
         if mpu.get_pipeline_model_parallel_world_size() > 1:
             losses_reduced = forward_backward_func(
                 forward_step_func=forward_step,
                 data_iterator=batch_generator,
                 model=self.critic_module,
                 num_microbatches=n_micro_batch,
-                seq_length=total_seqlen,  # no use when input_shapes was set
-                micro_batch_size=1,  # no use when input_shapes was set
+                seq_length=total_seqlen,
+                micro_batch_size=1,
                 forward_only=forward_only,
             )
         else:
@@ -281,11 +257,11 @@ class MegatronPPOCritic(BasePPOCritic):
                 data_iterator=batch_generator,
                 model=self.critic_module,
                 num_microbatches=n_micro_batch,
-                seq_length=total_seqlen,  # in use for pp = 1
-                micro_batch_size=1,  # in use for pp = 1
+                seq_length=total_seqlen,
+                micro_batch_size=1,
                 forward_only=forward_only,
             )
-        # loss_reduces contains the stats returned from loss_func
+
         losses_reduced = {"output": losses_reduced}
         if use_dynamic_bsz:
             losses_reduced["indices"] = indices
@@ -296,9 +272,9 @@ class MegatronPPOCritic(BasePPOCritic):
         metrics = {}
 
         for data in dataloader:
-            # data = data.batch.to(self.critic_module.device)
+
             self.critic_optimizer.zero_grad()
-            # use use_contiguous_buffers_in_local_ddp and no overlap_dp_param_comm
+
             for chunk in self.critic_module:
                 chunk.zero_grad_buffer()
 
@@ -321,14 +297,13 @@ class MegatronPPOCritic(BasePPOCritic):
             append_to_dict(metrics, data)
 
             if update_successful:
-                # allgather already execute in optimizer.step in new megatron
+
                 pass
             else:
                 raise NotImplementedError
 
             for metric in metric_micro_batch:
-                append_to_dict(metrics, metric)  # append the metric from this micro-batch to global metrics.
+                append_to_dict(metrics, metric)
 
-        # add empty cache after each compute
         get_torch_device().empty_cache()
         return metrics

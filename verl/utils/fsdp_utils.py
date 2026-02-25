@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import functools
 import itertools
@@ -39,13 +27,11 @@ elif version.parse(torch.__version__) >= version.parse("2.4"):
 else:
     fully_shard, MixedPrecisionPolicy, FSDPModule, CPUOffloadPolicy = None, None, None, None
 
-
 def init_fn(x: torch.nn.Module):
     if torch.distributed.get_rank() != 0:
         x = x.to_empty(device=get_device_id(), recurse=False)
         get_torch_device().empty_cache()
     return x
-
 
 def get_init_weight_context_manager(use_meta_tensor=True, mesh: DeviceMesh = None):
     from accelerate import init_empty_weights
@@ -60,22 +46,10 @@ def get_init_weight_context_manager(use_meta_tensor=True, mesh: DeviceMesh = Non
         init_context = cpu_init_weights
     return init_context
 
-
-# Copyright 2020-present the HuggingFace Inc. team.
-# Adapted from https://github.com/huggingface/transformers/src/transformers/trainer.py
 def get_fsdp_wrap_policy(module, config=None, is_lora=False):
-    """Get FSDP wrap policy for the module.
-
-    Args:
-        module: The module to get wrap policy for
-        config: Configuration for wrap policy
-        is_lora: Whether to enable lambda policy for LoRA modules
-    """
     if config is None:
         config = {}
 
-    # NOTE: This is a temporary workaround to be compatible with the OmegaConf & dataclass. We will remove this
-    # once we have make all config in verl from OmegaConf to data class.
     def _get_attr(attr_name, default_value=None):
         if hasattr(config, "get"):
             return config.get(attr_name, default_value)
@@ -96,7 +70,6 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False):
 
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy
 
-    # Add lambda policy for LoRA modules if is_lora is True
     if is_lora:
 
         def lambda_policy_fn(module):
@@ -132,7 +105,6 @@ def get_fsdp_wrap_policy(module, config=None, is_lora=False):
 
     return auto_wrap_policy
 
-
 @torch.no_grad()
 def offload_fsdp_model_to_cpu(model: FSDP, empty_cache: bool = True):
     if fsdp_version(model) == 2:
@@ -140,7 +112,7 @@ def offload_fsdp_model_to_cpu(model: FSDP, empty_cache: bool = True):
         return
 
     assert isinstance(model, FSDP)
-    # lazy init FSDP model
+
     _lazy_init(model, model)
     assert model._is_root, "Only support root model offloading to CPU"
     for handle in model._all_handles:
@@ -153,12 +125,11 @@ def offload_fsdp_model_to_cpu(model: FSDP, empty_cache: bool = True):
             and flat_param.data.size() == flat_param._local_shard.size()
         )
         handle.flat_param_to(torch.device("cpu"), non_blocking=True)
-        # the following still keeps id(._local_shard) != id(.data)
+
         flat_param._local_shard = flat_param.data
         assert id(flat_param._local_shard) != id(flat_param.data)
     if empty_cache:
         get_torch_device().empty_cache()
-
 
 @torch.no_grad()
 def offload_fsdp2_model_to_cpu(model, empty_cache: bool = True):
@@ -167,7 +138,6 @@ def offload_fsdp2_model_to_cpu(model, empty_cache: bool = True):
     if empty_cache:
         get_torch_device().empty_cache()
 
-
 @torch.no_grad()
 def load_fsdp_model_to_gpu(model: FSDP):
     if fsdp_version(model) == 2:
@@ -175,7 +145,7 @@ def load_fsdp_model_to_gpu(model: FSDP):
         return
 
     assert isinstance(model, FSDP)
-    # lazy init FSDP model
+
     _lazy_init(model, model)
     assert model._is_root, "Only support root model loading to GPU"
     device_id = get_device_id()
@@ -184,16 +154,14 @@ def load_fsdp_model_to_gpu(model: FSDP):
             continue
         flat_param = handle.flat_param
         handle.flat_param_to(torch.device(f"{get_device_name()}:{device_id}"), non_blocking=True)
-        # the following still keeps id(._local_shard) != id(.data)
-        flat_param._local_shard = flat_param.data
 
+        flat_param._local_shard = flat_param.data
 
 @torch.no_grad()
 def load_fsdp2_model_to_gpu(model):
     device = get_device_id()
     for param in model.parameters():
         param.data = param.data.to(device, non_blocking=True)
-
 
 @torch.no_grad()
 def offload_fsdp_optimizer(optimizer):
@@ -206,7 +174,6 @@ def offload_fsdp_optimizer(optimizer):
                 if isinstance(value, torch.Tensor):
                     state[key] = value.to("cpu", non_blocking=True)
 
-
 @torch.no_grad()
 def load_fsdp_optimizer(optimizer, device_id):
     if not optimizer.state:
@@ -218,24 +185,15 @@ def load_fsdp_optimizer(optimizer, device_id):
                 if isinstance(value, torch.Tensor):
                     state[key] = value.to(device_id, non_blocking=True)
 
-
 @contextmanager
 def meta_device_init():
-    """
-    Create model parameters with meta device.
-
-    Note buffers in model will still be initialized in default device (e.g., CPU),
-    since the buffers can be non-persistent and filled with expected values that can
-    NOT be captured in meta device.
-    """
     device = torch.device("meta")
     old_register_parameter = nn.Module.register_parameter
     registered = set()
 
     def register_empty_parameter(module, name, param):
         old_register_parameter(module, name, param)
-        # we will skip register shared parameters as it
-        # is already registered previously
+
         if param is not None and param not in registered:
             param_cls = type(module._parameters[name])
             kwargs = module._parameters[name].__dict__
@@ -250,23 +208,7 @@ def meta_device_init():
         registered.clear()
         nn.Module.register_parameter = old_register_parameter
 
-
 def parallel_load_safetensors(filepath):
-    """
-    Parallel load safetensors from huggingface checkpoint
-
-    Huggingface checkpoint contains:
-
-    - config.json: a json file for model configuration
-    - model.safetensor.index.json: a json file for safetensors (parameters & buffers) index
-    - model-000x-of-ooxx.safetensors: a binary file for safetensors (parameters & buffers) chunks
-
-    Or (when model is small),
-
-    - model.safetensors: a binary file for all parameters and buffers
-
-    Each rank will own a part of model chunks and load them directly into GPU memory.
-    """
     from safetensors.torch import load_file
 
     safetensors2param = {}
@@ -277,7 +219,7 @@ def parallel_load_safetensors(filepath):
         for param_name, filename in index["weight_map"].items():
             safetensors2param.setdefault(filename, []).append(param_name)
     else:
-        # in this case, the model is small and we can load it all at once
+
         param_file = os.path.join(filepath, "model.safetensors")
         assert os.path.exists(param_file), f"Cannot find {param_file}"
         states = load_file(param_file)
@@ -298,7 +240,7 @@ def parallel_load_safetensors(filepath):
             for file in files:
                 file = os.path.join(filepath, file)
                 states = load_file(file, device=device)
-                # print(f"rank {rank} loading {file}...")
+
                 shard_states.update(states)
         else:
             for file in files:
@@ -306,26 +248,14 @@ def parallel_load_safetensors(filepath):
                     shard_states[param_name] = rank
     return shard_states
 
-
 def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, torch.nn.Parameter]):
-    """
-    Generate a function to initialize sub-modules in the `module` with `shard_states`
-    from huggingface checkpoint.
-
-    Args:
-        module (torch.nn.Module): the global module to be initialized
-        shard_states (Dict[str, torch.nn.Parameter]): the shard states from huggingface checkpoint
-
-    Returns:
-        init_fn (Callable): a function to initialize sub-modules in the `module` with `shard_states`
-    """
 
     state2fqn = {}
     for name, state in itertools.chain(
         module.named_parameters(remove_duplicate=False), module.named_buffers(remove_duplicate=False)
     ):
         state2fqn.setdefault(state, []).append(name)
-    # remove standalone parameters and buffers
+
     shared = {s for s, names in state2fqn.items() if len(names) > 1}
     materialized_states = {}
 
@@ -335,15 +265,15 @@ def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, tor
         device = get_device_id()
         if is_param:
             param = torch.nn.Parameter(torch.empty_like(state.data, device=device), requires_grad=state.requires_grad)
-        else:  # buffer
+        else:
             param = torch.empty_like(state.data, device=device)
         loaded = shard_states[param_name]
         if isinstance(loaded, torch.nn.Parameter | torch.Tensor):
-            # NOTE: loaded.dtype can be different with param.dtype
+
             param.data.copy_(loaded.data)
             dist.broadcast(param.data, src=dist.get_rank())
         else:
-            assert isinstance(loaded, int)  # the rank that holds the state
+            assert isinstance(loaded, int)
             dist.broadcast(param.data, src=loaded)
         shard_states.pop(param_name)
         del loaded
@@ -351,13 +281,13 @@ def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, tor
 
     def init_fn(sub_mod: torch.nn.Module, recurse: bool = True):
         param_and_buffers = tuple(sub_mod.named_parameters(recurse=False)) + tuple(sub_mod.named_buffers(recurse=False))
-        # param_and_buffers = sorted(sub_mod.named_parameters(recurse=False), key=lambda x: x[0])
+
         for name, state in param_and_buffers:
             if not state.is_meta:
                 continue
             is_param = name in sub_mod._parameters
             fqn = state2fqn[state].pop(0)
-            # non-persistent buffers will not be saved in state dict, we can safely skip it
+
             if (not is_param) and fqn not in shard_states:
                 if state.is_meta:
                     raise RuntimeError(
@@ -365,7 +295,7 @@ def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, tor
                         f"in checkpoint and user should guarantee to init in CPU / GPU device."
                     )
                 continue
-            # for shared parameter, we get it from the first time it is created
+
             if state in shared:
                 if state not in materialized_states:
                     materialized_states[state] = create_and_sync_state(fqn, state, is_param)
@@ -373,7 +303,7 @@ def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, tor
                     if fqn in shard_states:
                         shard_states.pop(fqn)
                 materialize_state = materialized_states[state]
-            # for not shared parameter, we create it directly
+
             else:
                 materialize_state = create_and_sync_state(fqn, state, is_param)
             if is_param:
@@ -384,12 +314,9 @@ def parallel_init_module_fn(module: torch.nn.Module, shard_states: dict[str, tor
             for module in sub_mod.children():
                 init_fn(module, recurse=True)
 
-        # for debug
-        # if len(shard_states) == 0: print("clear")
         return sub_mod
 
     return init_fn
-
 
 def fsdp_version(model):
     if isinstance(model, FSDP):
@@ -399,29 +326,13 @@ def fsdp_version(model):
     else:
         return 0
 
-
 def get_fsdp_state_ctx(model, state_type, state_cfg, optim_cfg):
     if fsdp_version(model) == 1:
         return FSDP.state_dict_type(model, state_type, state_cfg, optim_cfg)
     else:
         return nullcontext()
 
-
 def get_fsdp_full_state_dict(model: torch.nn.Module, offload_to_cpu: bool = True, rank0_only: bool = True):
-    """
-    Get the full state dict from an FSDP model.
-
-    Args:
-        model (torch.nn.Module): The FSDP model to get state dict from
-        offload_to_cpu (bool, optional): Whether to offload the state dict to CPU. Defaults to True.
-        rank0_only (bool, optional): Whether to only get state dict on rank 0. Defaults to True.
-
-    Returns:
-        dict: The full state dict of the model
-
-    Raises:
-        NotImplementedError: If the FSDP version is unknown
-    """
     if fsdp_version(model) == 1:
         from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 
@@ -442,19 +353,9 @@ def get_fsdp_full_state_dict(model: torch.nn.Module, offload_to_cpu: bool = True
     else:
         raise NotImplementedError(f"Unknown FSDP version {fsdp_version}")
 
-
 def fsdp2_load_full_state_dict(model: torch.nn.Module, full_state: dict, device_mesh=None, cpu_offload=None):
-    """
-    Loads the full state dict (could be only on rank 0) into the sharded model. This is done by broadcasting the
-    parameters from rank 0 to all other ranks. This function modifies the model in-place.
-
-    Args:
-        model (`torch.nn.Module`): The model to load the state dict into
-        full_state (`dict`): The full state dict to load, can only be on rank 0
-    """
     from torch.distributed.checkpoint.state_dict import StateDictOptions, set_model_state_dict
 
-    # To broadcast, it needs to be instantiated in the GPU.
     if dist.get_rank() == 0:
         model = model.to(device=get_device_id(), non_blocking=True)
     else:
@@ -464,7 +365,6 @@ def fsdp2_load_full_state_dict(model: torch.nn.Module, full_state: dict, device_
     options = StateDictOptions(full_state_dict=True, cpu_offload=cpu_offload, broadcast_from_rank0=True)
     set_model_state_dict(model, full_state, options=options)
 
-    # rotary_emb is not in state_dict, so we need to broadcast it manually
     for name, buf in model.named_buffers():
         dist.broadcast(buf, src=0)
 
@@ -473,9 +373,7 @@ def fsdp2_load_full_state_dict(model: torch.nn.Module, full_state: dict, device_
         for buf in model.buffers():
             buf.data = buf.data.to(get_device_id())
 
-
 def apply_fsdp2(model, fsdp_kwargs, config):
-    """model: AutoModelForCausalLM"""
     assert CPUOffloadPolicy is not None, "PyTorch version >= 2.4 is required for using fully_shard API (FSDP2)"
 
     default_transformer_cls_names_to_wrap = getattr(model, "_no_split_modules", None)
@@ -497,24 +395,21 @@ def apply_fsdp2(model, fsdp_kwargs, config):
 
     for idx, module in enumerate(modules):
         fully_shard(module, **fsdp_kwargs)
-    fully_shard(model, **fsdp_kwargs)  # fsdp2 will not reshard_after_forward for root module
-
+    fully_shard(model, **fsdp_kwargs)
 
 def fsdp2_clip_grad_norm_(parameters, max_norm, norm_type=2.0, error_if_nonfinite=False, foreach=None):
-    """torch.nn.utils.clip_grad_norm_ cann't run on cpu parameter DTensor"""
     from torch.nn.utils.clip_grad import _clip_grads_with_norm_, _get_total_norm
 
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
-        # prevent generators from being exhausted
+
         parameters = list(parameters)
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     total_norm = total_norm.to(get_device_id(), non_blocking=True)
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
     return total_norm
-
 
 def layered_summon_lora_params(fsdp_module) -> OrderedDict:
     from peft.utils.save_and_load import get_peft_model_state_dict
@@ -526,11 +421,11 @@ def layered_summon_lora_params(fsdp_module) -> OrderedDict:
 
     lora_params = OrderedDict()
     prefix_list = [
-        # fsdp
+
         "_fsdp_wrapped_module.base_model.model.",
         "_fsdp_wrapped_module.base_model.model.model.",
         "_fsdp_wrapped_module.base_model.model.model.layers.",
-        # fsdp2
+
         "base_model.model.",
         "base_model.model.model.",
         "base_model.model.model.layers.",

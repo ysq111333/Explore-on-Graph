@@ -1,22 +1,3 @@
-# Copyright 2023-2024 SGLang Team
-# Copyright 2025 ModelBest Inc. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-usage: torchrun --standalone --nnodes=1 \
-    --nproc_per_node=2 $(which pytest) \
-    -s test_sglang_async_rollout_w_interaction.py
-"""
 
 import numpy as np
 import torch
@@ -37,7 +18,6 @@ from utils_sglang import (
 from verl import DataProto
 from verl.workers.rollout.sglang_rollout.sglang_rollout import SGLangRollout
 from verl.workers.sharding_manager.fsdp_sglang import FSDPSGLangShardingManager
-
 
 def test_async_sglang_rollout_w_interaction():
     assert torch.cuda.device_count() >= 2
@@ -87,7 +67,6 @@ def test_async_sglang_rollout_w_interaction():
         device_mesh=fsdp_device_mesh,
     )
 
-    # Create a temporary interaction config file for testing
     import tempfile
 
     from omegaconf import OmegaConf
@@ -146,10 +125,10 @@ def test_async_sglang_rollout_w_interaction():
         )
 
         prompts = rollout_sharding_manager.preprocess_data(prompts)
-        # log_gpu_memory_usage("Before generating sequences", logger=None)
+
         output = rollout.generate_sequences(prompts=prompts)
         print(f"generated {output.batch['responses'].shape=}")
-        # log_gpu_memory_usage("After generating sequences", logger=None)
+
         output = rollout_sharding_manager.postprocess_data(output)
         print(f"postprocessed {output.batch['responses'].shape=}")
         sglang_output = output.to("cpu")
@@ -161,14 +140,12 @@ def test_async_sglang_rollout_w_interaction():
     assert are_lists_similar(hf_response_tokens, sglang_response_tokens)
     print("SGLang w interaction Test Passed!")
 
-    # Clean up temporary config file
     import os
 
     os.unlink(interaction_config_path)
 
     torch.distributed.barrier()
     torch.distributed.destroy_process_group()
-
 
 if __name__ == "__main__":
     test_async_sglang_rollout_w_interaction()

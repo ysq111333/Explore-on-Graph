@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 
@@ -25,27 +13,25 @@ from vllm import LLM, SamplingParams
 from verl.utils.distributed import initialize_global_process_group
 from verl.utils.torch_functional import pad_sequence_to_length
 
-
 def levenshtein(s1, s2):
     m, n = len(s1), len(s2)
-    # Initialize matrix of zeros
+
     dp = [[0] * (n + 1) for _ in range(m + 1)]
-    # Initialize first column and first row of the matrix
+
     for i in range(m + 1):
-        dp[i][0] = i  # Deletion from s1 to empty string
+        dp[i][0] = i
     for j in range(n + 1):
-        dp[0][j] = j  # Insertion to s1 from empty string
-    # Compute the Levenshtein distance matrix
+        dp[0][j] = j
+
     for i in range(1, m + 1):
         for j in range(1, n + 1):
-            cost = 0 if s1[i - 1] == s2[j - 1] else 1  # No cost if characters match
+            cost = 0 if s1[i - 1] == s2[j - 1] else 1
             dp[i][j] = min(
-                dp[i - 1][j] + 1,  # Deletion
-                dp[i][j - 1] + 1,  # Insertion
-                dp[i - 1][j - 1] + cost,  # Substitution
+                dp[i - 1][j] + 1,
+                dp[i][j - 1] + 1,
+                dp[i - 1][j - 1] + cost,
             )
     return dp[m][n]
-
 
 def are_lists_similar(a, b):
     if len(a) != len(b):
@@ -67,13 +53,11 @@ def are_lists_similar(a, b):
 
     return percentage_difference <= 15
 
-
 @pytest.mark.skip("https://github.com/vllm-project/vllm/issues/16993")
 def test_vllm_spmd():
     assert torch.cuda.device_count() >= 2, "At least 2 GPUs is required to run tp+dp tests."
     local_rank, rank, world_size = initialize_global_process_group()
 
-    # Initialize model and token
     local_cache_path = "~/.cache/verl/rlhf"
     local_cache_path = os.path.expanduser(local_cache_path)
     hdfs_path = "Qwen/Qwen2-7B-Instruct"
@@ -85,7 +69,6 @@ def test_vllm_spmd():
     actor_model = AutoModelForCausalLM.from_pretrained(local_model_path, trust_remote_code=True)
     actor_model.to(torch.bfloat16)
 
-    # fill rollout config
     max_prompt_length = 16
     max_response_length = 32
     preencode_prompts = [
@@ -177,7 +160,6 @@ def test_vllm_spmd():
     assert are_lists_similar(vllm_response_tokens, verl_vllm_response_tokens), "Strings differ more than 10%:\n"
     print("Check Pass")
     torch.distributed.destroy_process_group()
-
 
 if __name__ == "__main__":
     test_vllm_spmd()

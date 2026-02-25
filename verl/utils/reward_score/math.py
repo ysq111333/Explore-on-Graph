@@ -1,17 +1,3 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# Adapted from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/hendrycks_math/utils.py
 
 
 def compute_score(solution_str, ground_truth) -> float:
@@ -27,8 +13,6 @@ def compute_score(solution_str, ground_truth) -> float:
 
     return retval
 
-
-# string normalization from https://github.com/EleutherAI/lm-evaluation-harness/blob/master/lm_eval/tasks/hendrycks_math.py
 def is_equiv(str1, str2, verbose=False):
     if str1 is None and str2 is None:
         print("WARNING: Both None")
@@ -45,7 +29,6 @@ def is_equiv(str1, str2, verbose=False):
     except Exception:
         return str1 == str2
 
-
 def remove_boxed(s):
     if "\\boxed " in s:
         left = "\\boxed "
@@ -58,7 +41,6 @@ def remove_boxed(s):
     assert s[-1] == "}"
 
     return s[len(left) : -1]
-
 
 def last_boxed_only_string(string):
     idx = string.rfind("\\boxed")
@@ -86,7 +68,6 @@ def last_boxed_only_string(string):
 
     return retval
 
-
 def fix_fracs(string):
     substrs = string.split("\\frac")
     new_str = substrs[0]
@@ -99,7 +80,7 @@ def fix_fracs(string):
             else:
                 try:
                     assert len(substr) >= 2
-                except:  # noqa: E722
+                except:
                     return string
                 a = substr[0]
                 b = substr[1]
@@ -118,7 +99,6 @@ def fix_fracs(string):
     string = new_str
     return string
 
-
 def fix_a_slash_b(string):
     if len(string.split("/")) != 2:
         return string
@@ -130,19 +110,17 @@ def fix_a_slash_b(string):
         assert string == "{}/{}".format(a, b)
         new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
         return new_string
-    except:  # noqa: E722
+    except:
         return string
 
-
 def remove_right_units(string):
-    # "\\text{ " only ever occurs (at least in the val set) when describing units
+
     if "\\text{ " in string:
         splits = string.split("\\text{ ")
         assert len(splits) == 2
         return splits[0]
     else:
         return string
-
 
 def fix_sqrt(string):
     if "\\sqrt" not in string:
@@ -158,67 +136,50 @@ def fix_sqrt(string):
         new_string += new_substr
     return new_string
 
-
 def strip_string(string):
-    # linebreaks
+
     string = string.replace("\n", "")
 
-    # remove inverse spaces
     string = string.replace("\\!", "")
 
-    # replace \\ with \
     string = string.replace("\\\\", "\\")
 
-    # replace tfrac and dfrac with frac
     string = string.replace("tfrac", "frac")
     string = string.replace("dfrac", "frac")
 
-    # remove \left and \right
     string = string.replace("\\left", "")
     string = string.replace("\\right", "")
 
-    # Remove circ (degrees)
     string = string.replace("^{\\circ}", "")
     string = string.replace("^\\circ", "")
 
-    # remove dollar signs
     string = string.replace("\\$", "")
 
-    # remove units (on the right)
     string = remove_right_units(string)
 
-    # remove percentage
     string = string.replace("\\%", "")
-    string = string.replace("\%", "")  # noqa: W605
+    string = string.replace("\%", "")
 
-    # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
     string = string.replace(" .", " 0.")
     string = string.replace("{.", "{0.")
-    # if empty, return empty string
+
     if len(string) == 0:
         return string
     if string[0] == ".":
         string = "0" + string
 
-    # to consider: get rid of e.g. "k = " or "q = " at beginning
     if len(string.split("=")) == 2 and len(string.split("=")[0]) <= 2:
         string = string.split("=")[1]
 
-    # fix sqrt3 --> sqrt{3}
     string = fix_sqrt(string)
 
-    # remove spaces
     string = string.replace(" ", "")
 
-    # \frac1b or \frac12 --> \frac{1}{b} and \frac{1}{2}, etc. Even works with \frac1{72} (but not \frac{72}1).
-    # Also does a/b --> \\frac{a}{b}
     string = fix_fracs(string)
 
-    # manually change 0.5 --> \frac{1}{2}
     if string == "0.5":
         string = "\\frac{1}{2}"
 
-    # NOTE: X/Y changed to \frac{X}{Y} in dataset, but in simple cases fix in case the model output is X/Y
     string = fix_a_slash_b(string)
 
     return string

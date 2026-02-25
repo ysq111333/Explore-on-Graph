@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import datetime
 import inspect
@@ -25,16 +13,12 @@ from codetiming import Timer
 from verl.utils.device import get_device_id, get_torch_device
 from verl.utils.logger import DecoratorLoggerBase
 
-
 def _get_current_mem_info(unit: str = "GB", precision: int = 2) -> tuple[str]:
-    """Get current memory usage."""
     assert unit in ["GB", "MB", "KB"]
     divisor = 1024**3 if unit == "GB" else 1024**2 if unit == "MB" else 1024
     mem_allocated = get_torch_device().memory_allocated()
     mem_reserved = get_torch_device().memory_reserved()
-    # use get_torch_device().mem_get_info to profile device memory
-    # since vllm's sleep mode works below pytorch
-    # see https://github.com/vllm-project/vllm/pull/11743#issuecomment-2754338119
+
     mem_free, mem_total = get_torch_device().mem_get_info()
     mem_used = mem_total - mem_free
     mem_allocated = f"{mem_allocated / divisor:.{precision}f}"
@@ -43,16 +27,7 @@ def _get_current_mem_info(unit: str = "GB", precision: int = 2) -> tuple[str]:
     mem_total = f"{mem_total / divisor:.{precision}f}"
     return mem_allocated, mem_reserved, mem_used, mem_total
 
-
 def log_gpu_memory_usage(head: str, logger: logging.Logger = None, level=logging.DEBUG, rank: int = 0):
-    """Log GPU memory usage information.
-
-    Args:
-        head (str): A descriptive header for the memory usage log message.
-        logger (logging.Logger, optional): Logger instance to use for logging. If None, prints to stdout.
-        level: Logging level to use. Defaults to logging.DEBUG.
-        rank (int): The rank of the process to log memory for. Defaults to 0.
-    """
     if (not dist.is_initialized()) or (rank is None) or (dist.get_rank() == rank):
         mem_allocated, mem_reserved, mem_used, mem_total = _get_current_mem_info()
         message = (
@@ -65,17 +40,7 @@ def log_gpu_memory_usage(head: str, logger: logging.Logger = None, level=logging
         else:
             logger.log(msg=message, level=level)
 
-
 class GPUMemoryLogger(DecoratorLoggerBase):
-    """A decorator class to log GPU memory usage.
-
-    Example:
-        >>> from verl.utils.profiler.performance import GPUMemoryLogger
-        >>> @GPUMemoryLogger(role="actor")
-        >>> def update_actor(self, batch):
-        ...     # real actor update logics
-        ...     return
-    """
 
     def __init__(self, role: str, logger: logging.Logger = None, level=logging.DEBUG, log_only_rank_0: bool = True):
         if dist.is_initialized() and dist.get_world_size() > 1:
@@ -110,7 +75,6 @@ class GPUMemoryLogger(DecoratorLoggerBase):
         self.logging_function(message)
         return output
 
-
 def log_print(ctn: Any):
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -120,37 +84,16 @@ def log_print(ctn: Any):
     file_name = frame.f_code.co_filename.split("/")[-1]
     print(f"[{current_time}-{file_name}:{line_number}:{function_name}]: {ctn}")
 
-
 def _timer(name: str, timing_raw: dict[str, float]):
-    """Inner function that handles the core timing logic.
-
-    Args:
-        name (str): The name/identifier for this timing measurement.
-        timing_raw (Dict[str, float]): Dictionary to store timing information.
-    """
     with Timer(name=name, logger=None) as timer:
         yield
     if name not in timing_raw:
         timing_raw[name] = 0
     timing_raw[name] += timer.last
 
-
 @contextmanager
 def simple_timer(name: str, timing_raw: dict[str, float]):
-    """Context manager for basic timing without NVTX markers.
-
-    This utility function measures the execution time of code within its context
-    and accumulates the timing information in the provided dictionary.
-
-    Args:
-        name (str): The name/identifier for this timing measurement.
-        timing_raw (Dict[str, float]): Dictionary to store timing information.
-
-    Yields:
-        None: This is a context manager that yields control back to the code block.
-    """
     yield from _timer(name, timing_raw)
-
 
 @contextmanager
 def marked_timer(
@@ -160,37 +103,9 @@ def marked_timer(
     domain: Optional[str] = None,
     category: Optional[str] = None,
 ):
-    """Context manager for timing with platform markers.
-
-    This utility function measures the execution time of code within its context,
-    accumulates the timing information, and adds platform markers for profiling.
-    This function is a default implementation when hardware profiler is not available.
-
-    Args:
-        name (str): The name/identifier for this timing measurement.
-        timing_raw (Dict[str, float]): Dictionary to store timing information.
-        color (Optional[str]): Color for the marker. Defaults to None.
-        domain (Optional[str]): Domain for the marker. Defaults to None.
-        category (Optional[str]): Category for the marker. Defaults to None.
-
-    Yields:
-        None: This is a context manager that yields control back to the code block.
-    """
     yield from _timer(name, timing_raw)
 
-
 def reduce_timing(timing_raw: dict[str, float]) -> dict[str, float]:
-    """Reduce timing information across all processes.
-
-    This function uses distributed communication to gather and sum the timing
-    information from all processes in a distributed environment.
-
-    Args:
-        timing_raw (Dict[str, float]): Dictionary containing timing information.
-
-    Returns:
-        Dict[str, float]: Reduced timing information.
-    """
     if not dist.is_initialized():
         return timing_raw
 

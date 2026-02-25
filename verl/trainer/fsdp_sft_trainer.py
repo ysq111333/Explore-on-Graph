@@ -1,22 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-A lightweight one-file FSDP SFT Trainer
-TODO(zhangchi.usc1992)
-- Add calculation of mfu
-- Add validation
-"""
+
 
 import os
 
@@ -81,13 +63,11 @@ elif is_npu_available:
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_SFT_LOGGING_LEVEL", "WARN"))
 
-
 def extract_step(path):
     match = re.search(r"global_step_(\d+)", path)
     if match:
         return int(match.group(1))
     return None
-
 
 class FSDPSFTTrainer:
     def __init__(
@@ -107,10 +87,8 @@ class FSDPSFTTrainer:
         if self.config.data.chat_template is not None:
             raise ValueError("Apply Chat template from config is not supported yet.")
 
-        # normalize dp size
         self._normalize_config_bsz()
 
-        # Set sequence parallel size
         self.config.ulysses_sequence_parallel_size = getattr(self.config, "ulysses_sequence_parallel_size", 1)
         self.use_remove_padding = getattr(self.config, "use_remove_padding", False)
         if self.device_mesh.get_rank() == 0:
@@ -119,13 +97,10 @@ class FSDPSFTTrainer:
 
         self._build_dataloader(train_dataset, val_dataset)
 
-        # Initialize resume-related variables
         self.resume_global_step = 0
 
-        # build model
         self._build_model_optimizer()
 
-        # Initialize checkpoint manager
         self._init_checkpoint_manager()
 
         self.load_checkpoint()
@@ -148,14 +123,10 @@ class FSDPSFTTrainer:
         assert self.config.data.train_batch_size % self.config.data.micro_batch_size_per_gpu == 0
 
     def _build_dataloader(self, train_dataset, val_dataset):
-        # build dataset
+
         config = self.config
         self.train_dataset, self.val_dataset = train_dataset, val_dataset
 
-        # build dataloader
-        # Use data parallel rank and size instead of global rank and world size
-
-        # If doing SP, we need to use the local rank and size
         if self.config.ulysses_sequence_parallel_size > 1:
             rank = self.ulysses_device_mesh.get_local_rank("dp")
             world_size = self.ulysses_device_mesh.size(0)
@@ -193,13 +164,11 @@ class FSDPSFTTrainer:
         )
 
     def _build_model_optimizer(self):
-        # TODO (zhangchi.usc1992):
-        # 1. support pretrain from random weights
-        # 2. support init directly from sharded weights
+
         local_model_path = copy_to_local(src=self.config.model.partial_pretrain, verbose=True)
 
         if self.config.model.get("external_lib", None) is not None:
-            # This is used to import external_lib into the huggingface systems
+
             import importlib
 
             importlib.import_module(self.config.model.external_lib)
@@ -209,7 +178,7 @@ class FSDPSFTTrainer:
         trust_remote_code = self.config.model.trust_remote_code
         torch_dtype = self.config.model.fsdp_config.get("model_dtype", "fp32")
         torch_dtype = PrecisionType.to_dtype(torch_dtype)
-        # load config first
+
         config = AutoConfig.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
         self.model_config = config
         if hasattr(self.model_config, "max_position_embeddings"):
@@ -219,7 +188,6 @@ class FSDPSFTTrainer:
         if self.config.ulysses_sequence_parallel_size > 1:
             assert self.use_remove_padding, "Sequence parallel is only supported when remove_padding is enabled"
 
-        # This may be very large
         init_context = get_init_weight_context_manager(
             use_meta_tensor=not config.tie_word_embeddings, mesh=self.device_mesh
         )
@@ -238,7 +206,6 @@ class FSDPSFTTrainer:
 
                 apply_monkey_patch(model=self.model, ulysses_sp_size=self.config.ulysses_sequence_parallel_size)
 
-            # Apply Liger kernel if use_liger is enabled
             if self.config.model.get("use_liger", False):
                 from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
 
@@ -246,7 +213,7 @@ class FSDPSFTTrainer:
 
             if self.config.model.get("lora_rank", 0) > 0:
                 self.model.enable_input_require_grads()
-                # Convert config to regular Python types before creating PEFT model
+
                 lora_config = {
                     "task_type": TaskType.CAUSAL_LM,
                     "r": self.config.model.lora_rank,
@@ -347,21 +314,18 @@ class FSDPSFTTrainer:
             raise ValueError(f"Unknown lr scheduler: {self.config.optim.lr_scheduler}")
 
     def _compute_loss_and_backward(self, batch, do_backward=True):
-        """Compute loss with optional sequence parallelism and remove padding features"""
         use_sp = self.use_remove_padding and self.config.ulysses_sequence_parallel_size > 1
 
-        # Move inputs to GPU and prepare loss mask
         input_ids = batch["input_ids"].to(self.device_name)
         attention_mask = batch["attention_mask"].to(self.device_name)
         position_ids = batch["position_ids"].to(self.device_name)
         loss_mask = batch.pop("loss_mask")[:, :-1].reshape(-1).to(self.device_name)
         loss_fct = nn.CrossEntropyLoss(reduction="none")
 
-        # Context manager for sequence parallel if needed
         context = self.sharding_manager if use_sp else nullcontext()
         with context, torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
             if not use_sp:
-                # Standard forward pass without sequence parallel
+
                 labels = input_ids[:, 1:].contiguous()
                 output = self.fsdp_model(
                     input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, use_cache=False
@@ -370,63 +334,53 @@ class FSDPSFTTrainer:
 
                 shift_logits = logits[..., :-1, :].contiguous()
                 shift_labels = labels.contiguous()
-                # Flatten the tokens
+
                 shift_logits = shift_logits.view(-1, self.model.config.vocab_size)
                 shift_labels = shift_labels.view(-1)
-                # Enable model parallelism
+
                 shift_labels = shift_labels.to(shift_logits.device)
                 loss = loss_fct(shift_logits, shift_labels)
                 loss = loss * loss_mask.to(loss.device)
             else:
-                # IMPORTANT: We have a big assumption here, so we can shard the SAME sequence across SP ranks
-                # i.e., each GPU has <1 sequence, and each SP group has 1 sequence
-                # 1. All SP ranks will receive the *SAME* batch
-                # 2. Different SP groups will receive *DIFFERENT* batches
-                # This is implemented by the DistributedSampler
 
                 batch_size, seqlen = input_ids.shape
-                # Remove padding
+
                 input_ids_rmpad, indices, *_ = unpad_input(
                     input_ids.unsqueeze(-1), attention_mask
-                )  # input_ids_rmpad (total_nnz, ...)
-                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+                )
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)
 
-                # Unpad position_ids to align rotary
                 position_ids_rmpad = index_first_axis(
                     rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
                 ).transpose(0, 1)
 
-                # Pad and slice inputs for sequence parallelism
                 input_ids_rmpad_sliced, position_ids_rmpad_padded, pad_size = ulysses_pad_and_slice_inputs(
                     input_ids_rmpad, position_ids_rmpad, sp_size=get_ulysses_sequence_parallel_world_size()
                 )
-                # For computing loss
-                input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
+
+                input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)
                 input_ids_rmpad_rolled, _, _ = ulysses_pad_and_slice_inputs(
                     input_ids_rmpad_rolled, None, get_ulysses_sequence_parallel_world_size()
                 )
-                input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
+                input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)
 
-                # Forward pass
                 output = self.fsdp_model(
                     input_ids=input_ids_rmpad_sliced,
-                    attention_mask=None,  # Not needed with flash attention varlen
+                    attention_mask=None,
                     position_ids=position_ids_rmpad_padded,
                     use_cache=False,
                 )
 
-                # Compute loss locally then aggregate
                 logits_rmpad = output.logits.squeeze(0)
                 input_ids_rmpad_rolled = input_ids_rmpad_rolled.to(logits_rmpad.device)
                 loss = loss_fct(logits_rmpad, input_ids_rmpad_rolled)
-                # Gather and unpad for sequence parallelism
+
                 loss = gather_outputs_and_unpad(loss, gather_dim=0, unpad_dim=0, padding_size=pad_size)
 
-                # This is the loss collected from all ulysses ranks
                 full_loss = pad_input(
                     hidden_states=loss.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
                 )
-                full_loss = full_loss.squeeze(-1)[:, :-1]  # Remove last token's loss
+                full_loss = full_loss.squeeze(-1)[:, :-1]
                 full_loss = full_loss.reshape(-1)
                 loss_mask = loss_mask.to(full_loss.device)
                 loss = full_loss * loss_mask
@@ -470,7 +424,6 @@ class FSDPSFTTrainer:
 
         log_gpu_memory_usage("Before optimizer step", logger=logger)
 
-        # if grad_norm is not finite, skip the update
         if not torch.isfinite(grad_norm):
             print(f"WARN: grad_norm is not finite: {grad_norm}")
             self.optimizer.zero_grad()
@@ -481,7 +434,6 @@ class FSDPSFTTrainer:
 
         self.lr_scheduler.step()
 
-        # reduce loss across dp ranks
         lr = self.lr_scheduler.get_last_lr()[0]
 
         log_gpu_memory_usage("After offload weights", logger=logger)
@@ -506,34 +458,27 @@ class FSDPSFTTrainer:
         return loss
 
     def save_checkpoint(self, step):
-        """Save checkpoint using FSDPCheckpointManager with improved tracking"""
         from verl.utils.fs import local_mkdir_safe
 
-        # Determine checkpoint path
         local_global_step_folder = os.path.join(self.config.trainer.default_local_dir, f"global_step_{step}")
 
         if self.device_mesh.get_rank() == 0:
             print(f"Saving checkpoint to: {local_global_step_folder}")
 
-        # Get max checkpoints to keep
         max_ckpt_to_keep = getattr(self.config.trainer, "max_ckpt_to_keep", None)
 
-        # Use checkpoint manager to save
         self.checkpoint_manager.save_checkpoint(
             local_path=local_global_step_folder, global_step=step, max_ckpt_to_keep=max_ckpt_to_keep
         )
 
-        # Save dataloader state
         if self.device_mesh.get_rank() == 0:
             local_mkdir_safe(local_global_step_folder)
             dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
 
-            # Use StatefulDataLoader's built-in state dict functionality
             dataloader_state_dict = self.train_dataloader.state_dict()
             torch.save(dataloader_state_dict, dataloader_local_path)
             print(f"Saved dataloader state to: {dataloader_local_path}")
 
-            # Update latest checkpoint tracker (atomic write)
             tracker_file = get_checkpoint_tracker_filename(self.config.trainer.default_local_dir)
             temp_tracker_file = tracker_file + ".tmp"
             with open(temp_tracker_file, "w") as f:
@@ -541,7 +486,6 @@ class FSDPSFTTrainer:
             os.rename(temp_tracker_file, tracker_file)
             print(f"Updated checkpoint tracker: {tracker_file}")
 
-        # Copy to HDFS if configured
         if self.device_mesh.get_rank() == 0 and getattr(self.config.trainer, "default_hdfs_dir", None):
             hdfs_io.makedirs(self.config.trainer.default_hdfs_dir, exist_ok=True)
             hdfs_io.copy(src=local_global_step_folder, dst=self.config.trainer.default_hdfs_dir, dirs_exist_ok=True)
@@ -549,24 +493,19 @@ class FSDPSFTTrainer:
         torch.distributed.barrier()
 
     def _init_checkpoint_manager(self):
-        """Initialize checkpoint manager with proper configuration"""
-        # Get checkpoint configuration from config, with defaults
+
         checkpoint_config = getattr(self.config.trainer, "checkpoint", {})
 
-        # Set default values if not specified
         save_contents = checkpoint_config.get("save_contents", ["model", "optimizer", "extra"])
         load_contents = checkpoint_config.get("load_contents", save_contents)
 
-        # Create checkpoint config dict
         checkpoint_config_dict = {
             "load_contents": load_contents,
             "save_contents": save_contents,
         }
 
-        # Convert to DictConfig for compatibility
         checkpoint_config_dict = DictConfig(checkpoint_config_dict)
 
-        # Initialize checkpoint manager
         self.checkpoint_manager = FSDPCheckpointManager(
             model=self.fsdp_model,
             optimizer=self.optimizer,
@@ -576,13 +515,12 @@ class FSDPSFTTrainer:
         )
 
     def load_checkpoint(self):
-        # Determine resume path based on configuration
+
         checkpoint_path = self._determine_resume_path()
 
         if checkpoint_path is None:
             return 0
 
-        # extract resume step from checkpoint path
         resume_step = extract_step(checkpoint_path)
         if resume_step is None:
             log_with_rank(
@@ -595,7 +533,6 @@ class FSDPSFTTrainer:
             return 0
         self.resume_global_step = resume_step
 
-        # Use checkpoint manager to load model state
         self.checkpoint_manager.load_checkpoint(checkpoint_path)
         log_with_rank(
             f"Successfully loaded model checkpoint from {checkpoint_path} (step {resume_step})",
@@ -604,17 +541,15 @@ class FSDPSFTTrainer:
             log_only_rank_0=True,
         )
 
-        # Always load dataloader state for StatefulDataLoader
         self._load_dataloader_state(checkpoint_path)
 
         return resume_step
 
     def _load_dataloader_state(self, checkpoint_path: str):
-        """Load dataloader state from checkpoint"""
         dataloader_path = os.path.join(checkpoint_path, "data.pt")
 
         if os.path.exists(dataloader_path):
-            # Use StatefulDataLoader's built-in state dict functionality
+
             dataloader_state_dict = torch.load(dataloader_path, map_location="cpu", weights_only=False)
             self.train_dataloader.load_state_dict(dataloader_state_dict)
 
@@ -635,7 +570,6 @@ class FSDPSFTTrainer:
             )
 
     def _determine_resume_path(self):
-        """Determine the path to resume from based on resume_mode configuration"""
         resume_mode = getattr(self.config.trainer, "resume_mode", "auto")
         resume_from_path = getattr(self.config.trainer, "resume_from_path", None)
 
@@ -648,7 +582,7 @@ class FSDPSFTTrainer:
                 )
                 assert "global_step_" in resume_from_path, "resume_from_path must specify the global_steps"
                 return resume_from_path
-            # Try to find the latest checkpoint in the default directory
+
             return self._find_latest_checkpoint()
         elif resume_mode == "resume_path":
             assert os.path.exists(resume_from_path), (
@@ -660,7 +594,6 @@ class FSDPSFTTrainer:
             raise ValueError(f"Invalid resume_mode: {resume_mode}. Must be 'auto', 'disable', or 'resume_path'")
 
     def _find_latest_checkpoint(self):
-        """Find the latest checkpoint in the default local directory"""
         checkpoint_dir = self.config.trainer.default_local_dir
 
         if not os.path.exists(checkpoint_dir):
@@ -677,7 +610,6 @@ class FSDPSFTTrainer:
     def fit(self):
         rank = self.device_mesh.get_rank()
 
-        # TODO: add a unified tracking
         if rank == 0:
             tracking = Tracking(
                 project_name=self.config.trainer.project_name,
@@ -685,10 +617,9 @@ class FSDPSFTTrainer:
                 default_backend=self.config.trainer.logger,
             )
 
-        global_step = self.resume_global_step  # Start from resumed step
+        global_step = self.resume_global_step
         last_valid_metric = None
-        # compute the total training steps.
-        # the total training steps in SFT is mainly for early exit
+
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
@@ -702,8 +633,6 @@ class FSDPSFTTrainer:
             log_only_rank_0=True,
         )
 
-        # With StatefulDataLoader, we don't need to manually calculate epochs and steps
-        # The dataloader will automatically resume from where it left off
         if global_step > 0:
             log_with_rank(
                 f"StatefulDataLoader will automatically resume from global step: {global_step}",
@@ -712,7 +641,6 @@ class FSDPSFTTrainer:
                 log_only_rank_0=True,
             )
 
-        # Calculate which epoch we're starting from for sampler.set_epoch()
         start_epoch = global_step // self.steps_per_epoch
 
         for epoch in range(start_epoch, self.config.trainer.total_epochs):
@@ -737,9 +665,8 @@ class FSDPSFTTrainer:
                 is_valid_step = global_step % self.config.trainer.test_freq == 0
                 is_save_step = global_step % self.config.trainer.save_freq == 0
 
-                # early exit or validation step
                 if is_last_step or (self.config.trainer.test_freq > 0 and is_valid_step):
-                    # Perform validation
+
                     val_losses = []
                     for val_data in self.val_dataloader:
                         val_data = TensorDict(val_data, batch_size=self.config.data.micro_batch_size_per_gpu).to(
@@ -762,7 +689,6 @@ class FSDPSFTTrainer:
                         print(f"Final validation metrics: {last_valid_metric}")
                     return
 
-
 def run_sft(config):
     device_name = get_device_name()
     local_rank, rank, world_size = initialize_global_process_group()
@@ -774,7 +700,7 @@ def run_sft(config):
         mesh_shape=(dp_size, config.ulysses_sequence_parallel_size),
         mesh_dim_names=("dp", "sp"),
     )
-    # build tokenizer and datasets first
+
     from verl.utils import hf_tokenizer
 
     local_model_path = copy_to_local(src=config.model.partial_pretrain, verbose=True)
@@ -795,31 +721,25 @@ def run_sft(config):
 
     destroy_global_process_group()
 
-
 @hydra.main(config_path="config", config_name="sft_trainer", version_base=None)
 def main(config):
     run_sft(config)
 
-
 def create_sft_dataset(data_paths, data_config, tokenizer):
-    """Create a dataset."""
-    # build dataset
-    # First check if a custom dataset class is specified
+
     if data_config.custom_cls.get("path", None):
         from verl.utils.import_utils import load_extern_type
 
         dataset_cls = load_extern_type(data_config.custom_cls.path, data_config.custom_cls.name)
-    # Then check if multi-turn dataset should be used
+
     elif data_config.get("multiturn", {}).get("enable", False):
         dataset_cls = MultiTurnSFTDataset
-    # Default to single-turn dataset
+
     else:
         dataset_cls = SFTDataset
 
-    # Create datasets based on the selected class
     dataset = dataset_cls(parquet_files=data_paths, tokenizer=tokenizer, config=data_config)
     return dataset
-
 
 if __name__ == "__main__":
     main()

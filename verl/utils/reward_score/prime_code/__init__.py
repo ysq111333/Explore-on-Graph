@@ -1,25 +1,12 @@
-# Copyright 2024 PRIME team and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import json
 import traceback
 
 from .utils import check_correctness as apps_check_correctness
 
-
 def compute_score(completion, test_cases, continuous=False):
-    # try to get code solution from completion. if the completion is pure code, this will not take effect.
+
     solution = completion.split("```python")[-1].split("```")[0]
     try:
         try:
@@ -28,7 +15,6 @@ def compute_score(completion, test_cases, continuous=False):
         except Exception as e:
             print(f"Error:{e}")
 
-        # Complete check on all in-out pairs first. If there is no failure, per-sample test can be skipped.
         try:
             res, metadata = apps_check_correctness(in_outs=test_cases, generation=solution, timeout=5, debug=False)
             metadata = dict(enumerate(metadata))[0]
@@ -45,14 +31,13 @@ def compute_score(completion, test_cases, continuous=False):
             test_cases_list.append({"inputs": [inputs[i]], "outputs": [outputs[i]]})
 
         if continuous:
-            # per sample test: if continuous score is needed, test first 10 samples regardless of failures
-            # do not test all samples cuz some problems have enormous test cases
+
             metadata_list = []
             res_list = []
             for test_case_id, test_case in enumerate(test_cases_list):
                 res, metadata = apps_check_correctness(in_outs=test_case, generation=solution, timeout=10, debug=False)
                 try:
-                    metadata = dict(enumerate(metadata))[0]  # metadata can be empty occasionally
+                    metadata = dict(enumerate(metadata))[0]
                 except Exception:
                     metadata = {}
                 metadata["test_case"] = {}

@@ -1,16 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import asyncio
 import importlib
@@ -26,11 +14,9 @@ from verl.tools.schemas import OpenAIFunctionToolSchema
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
 class ToolType(Enum):
     NATIVE = "native"
     MCP = "mcp"
-
 
 async def initialize_mcp_tool(tool_cls, tool_config) -> list:
     from verl.tools.utils.mcp_clients.McpClientManager import ClientManager
@@ -39,9 +25,9 @@ async def initialize_mcp_tool(tool_cls, tool_config) -> list:
     mcp_servers_config_path = tool_config.mcp.mcp_servers_config_path
     tool_selected_list = tool_config.mcp.tool_selected_list if "tool_selected_list" in tool_config.mcp else None
     await ClientManager.initialize(mcp_servers_config_path, tool_config.config.rate_limit)
-    # Wait for MCP client to be ready
+
     max_retries = 10
-    retry_interval = 2  # seconds
+    retry_interval = 2
     for i in range(max_retries):
         tool_schemas = await ClientManager.fetch_tool_schemas(tool_selected_list)
         if tool_schemas:
@@ -51,7 +37,7 @@ async def initialize_mcp_tool(tool_cls, tool_config) -> list:
             await asyncio.sleep(retry_interval)
     else:
         raise RuntimeError("Failed to initialize MCP tools after maximum retries")
-    # mcp registry
+
     assert len(tool_schemas), "mcp tool is empty"
     for tool_schema_dict in tool_schemas:
         logger.debug(f"tool_schema_dict: {tool_schema_dict}")
@@ -62,7 +48,6 @@ async def initialize_mcp_tool(tool_cls, tool_config) -> list:
         )
         tool_list.append(tool)
     return tool_list
-
 
 def get_tool_class(cls_name):
     module_name, class_name = cls_name.rsplit(".", 1)
@@ -76,7 +61,6 @@ def get_tool_class(cls_name):
 
     tool_cls = getattr(module, class_name)
     return tool_cls
-
 
 def initialize_tools_from_config(tools_config_file):
     tools_config = OmegaConf.load(tools_config_file)

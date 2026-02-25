@@ -1,33 +1,4 @@
-#
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
 
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 import typing
 
@@ -35,7 +6,6 @@ import torch
 import torch.distributed as dist
 
 from . import kernels
-
 
 class LinearCrossEntropy(torch.autograd.Function):
     @staticmethod
@@ -48,20 +18,6 @@ class LinearCrossEntropy(torch.autograd.Function):
         reduction: typing.Optional[str] = "none",
         dist_process_group: typing.Optional[dist.ProcessGroup] = None,
     ) -> list[torch.Tensor]:
-        """_summary_
-
-        Args:
-            ctx (_type_): _description_
-            hidden (torch.Tensor): (batch_size, num_tokens, hidden_size) -> (batch_size * num_tokens, hidden_size)
-            weight (torch.Tensor): (vocab_size, hidden_size)
-            labels (torch.Tensor): (batch_size, num_tokens) -> (batch_size * num_tokens, )
-            temperature (typing.Optional[float], optional): _description_. Defaults to 1.0.
-            reduction (typing.Optional[str], optional): _description_. Defaults to "none".
-            dist_process_group (typing.Optional[dist.ProcessGroup], optional): _description_. Defaults to None.
-
-        Returns:
-            typing.List[torch.Tensor]: _description_
-        """
 
         assert isinstance(temperature, float), f"temperature must be a float, but got {type(temperature)}"
         assert isinstance(reduction, str), f"reduction must be a str, but got {type(reduction)}"
@@ -70,7 +26,7 @@ class LinearCrossEntropy(torch.autograd.Function):
 
             original_hidden_shape = hidden.shape
             if len(hidden.shape) != 2:
-                hidden = hidden.view(-1, hidden.shape[-1])  # (batch_size * num_tokens, hidden_size)
+                hidden = hidden.view(-1, hidden.shape[-1])
             if len(labels.shape) != 1:
                 labels = labels.view(-1)
 
@@ -112,6 +68,5 @@ class LinearCrossEntropy(torch.autograd.Function):
             d_hidden = d_hidden.view(ctx.original_hidden_shape)
 
         return (d_hidden, d_weight, None, None, None, None)
-
 
 linear_cross_entropy = LinearCrossEntropy.apply

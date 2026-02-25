@@ -1,18 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-# Copyright (c) 2024 Alibaba PAI Team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from typing import Optional
 
@@ -29,8 +15,6 @@ from torch.nn import functional as F
 
 from .vision_transformer_block import Qwen2_5VisionTransformerBlock as TransformerBlock
 
-
-# copied from https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py
 class PatchEmbed(nn.Module):
     def __init__(
         self,
@@ -56,8 +40,6 @@ class PatchEmbed(nn.Module):
         hidden_states = self.proj(hidden_states.to(dtype=target_dtype)).view(-1, self.embed_dim)
         return hidden_states
 
-
-# copied from https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py
 class VisionRotaryEmbedding(nn.Module):
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
@@ -69,20 +51,7 @@ class VisionRotaryEmbedding(nn.Module):
         freqs = torch.outer(seq, self.inv_freq)
         return freqs.float()
 
-
 class Qwen2_5VisionModel(VisionModule):
-    """Qwen2.5 ViT vision model.
-
-    Args:
-        transformer_config (TransformerConfig): Transformer config.
-        transformer_layer_spec (ModuleSpec): Specifies module to use for transformer layers.
-        ln_pre_impl (ModuleSpec or type): Specifies the layer norm type to use for ln_pre.
-        add_class_token (bool, optional): Include a class token. Defaults to True.
-        class_token_len (int): Class token length. Defaults to 1 but 8 may be faster.
-        patch_dim (int): Image patch size.
-        img_h (int): Input image height.
-        img_w (int): Input image width.
-    """
 
     def __init__(
         self,
@@ -124,10 +93,6 @@ class Qwen2_5VisionModel(VisionModule):
         self.pre_process = pre_process
         self.post_process = post_process
 
-        # Transformer layers.
-        # TODO: Follow-up changes will make pre and post_process configurable. They are needed for supporting
-        # pipeline parallelism.
-        # NOTE: a final layer norm and/or linear layer present in some implementations are omitted here.
         self.decoder = TransformerBlock(
             config=transformer_config,
             spec=transformer_layer_spec,
@@ -149,12 +114,7 @@ class Qwen2_5VisionModel(VisionModule):
         self.input_tensor = None
 
     def set_input_tensor(self, input_tensor: torch.Tensor) -> None:
-        """Sets input tensor to the model.
-
-        Args:
-            input_tensor (Tensor): Sets the input tensor for the model.
-        """
-        if self.pre_process:  # always True
+        if self.pre_process:
             self.input_tensor = input_tensor
         else:
             raise NotImplementedError()
@@ -236,22 +196,10 @@ class Qwen2_5VisionModel(VisionModule):
         inference_params: Optional[InferenceParams] = None,
         extra_block_kwargs: dict = None,
     ) -> torch.Tensor:
-        """Forward function of the Qwen2 Vision Model. This function passes the input tensors
-        through the embedding layer and then the transformer.
-
-        Args:
-            x (torch.Tensor): input image/video data of shape [n_tokens, n_dims]
-            grid_thw (torch.Tensor): the size tensor indicates grid size of each image/frame
-            packed_seq_params (PackedSeqParams): parameters to build attention mask in the backend
-
-        Returns:
-            x (torch.Tensor): output after final transformer block of shape [b, s, h].
-        """
         assert grid_thw is not None
         assert self.input_tensor is None
         assert inference_params is None
 
-        # Rotary positional embeddings (embedding is None for PP intermediate devices)
         vision_data = self.patch_embed(vision_data)
         window_index, cu_window_seqlens = self.get_window_index(grid_thw)
         cu_window_seqlens = torch.tensor(
@@ -291,7 +239,7 @@ class Qwen2_5VisionModel(VisionModule):
         grid_thw: Optional[torch.Tensor],
         cu_seqlens: Optional[torch.Tensor] = None,
     ) -> PackedSeqParams:
-        # NOTE: each frame is a sequence (rather than each grid)
+
         if grid_thw is not None:
             seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
             cu_seqlens = seqlens.cumsum(dim=0)

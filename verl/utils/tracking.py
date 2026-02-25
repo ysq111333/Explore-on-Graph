@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-A unified tracking interface that supports logging data to different backend
-"""
+
 
 import dataclasses
 import os
@@ -22,17 +7,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-
 class Tracking:
-    """A unified tracking interface for logging experiment data to multiple backends.
-
-    This class provides a centralized way to log experiment metrics, parameters, and artifacts
-    to various tracking backends including WandB, MLflow, SwanLab, TensorBoard, and console.
-
-    Attributes:
-        supported_backend: List of supported tracking backends.
-        logger: Dictionary of initialized logger instances for each backend.
-    """
 
     supported_backend = ["wandb", "mlflow", "swanlab", "vemlp_wandb", "tensorboard", "console", "clearml"]
 
@@ -66,8 +41,6 @@ class Tracking:
             MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:////tmp/mlruns.db")
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-            # Project_name is actually experiment_name in MLFlow
-            # If experiment does not exist, will create a new experiment
             experiment = mlflow.set_experiment(project_name)
             mlflow.start_run(experiment_id=experiment.experiment_id, run_name=experiment_name)
             mlflow.log_params(_compute_mlflow_params_from_objects(config))
@@ -82,10 +55,10 @@ class Tracking:
             SWANLAB_LOG_DIR = os.environ.get("SWANLAB_LOG_DIR", "swanlog")
             SWANLAB_MODE = os.environ.get("SWANLAB_MODE", "cloud")
             if SWANLAB_API_KEY:
-                swanlab.login(SWANLAB_API_KEY)  # NOTE: previous login information will be overwritten
+                swanlab.login(SWANLAB_API_KEY)
 
             if config is None:
-                config = {}  # make sure config is not None, otherwise **config will raise error
+                config = {}
             swanlab.init(
                 project=project_name,
                 experiment_name=experiment_name,
@@ -145,7 +118,6 @@ class Tracking:
         if "clearnml" in self.logger:
             self.logger["clearnml"].finish()
 
-
 class ClearMLLogger:
     def __init__(self, project_name: str, experiment_name: str, config):
         self.project_name = project_name
@@ -169,7 +141,6 @@ class ClearMLLogger:
         import numpy as np
         import pandas as pd
 
-        # logs = self._rewrite_logs(data)
         logger = self._get_logger()
         for k, v in data.items():
             title, series = k.split("/", 1)
@@ -197,7 +168,6 @@ class ClearMLLogger:
     def finish(self):
         self._task.mark_completed()
 
-
 class _TensorboardAdapter:
     def __init__(self, project_name, experiment_name):
         import os
@@ -216,7 +186,6 @@ class _TensorboardAdapter:
     def finish(self):
         self.writer.close()
 
-
 class _MlflowLoggingAdapter:
     def log(self, data, step):
         import mlflow
@@ -224,13 +193,11 @@ class _MlflowLoggingAdapter:
         results = {k.replace("@", "_at_"): v for k, v in data.items()}
         mlflow.log_metrics(metrics=results, step=step)
 
-
 def _compute_mlflow_params_from_objects(params) -> dict[str, Any]:
     if params is None:
         return {}
 
     return _flatten_dict(_transform_params_to_json_serializable(params, convert_list_to_dict=True), sep="/")
-
 
 def _transform_params_to_json_serializable(x, convert_list_to_dict: bool):
     _transform = partial(_transform_params_to_json_serializable, convert_list_to_dict=convert_list_to_dict)
@@ -251,14 +218,12 @@ def _transform_params_to_json_serializable(x, convert_list_to_dict: bool):
 
     return x
 
-
 def _flatten_dict(raw: dict[str, Any], *, sep: str) -> dict[str, Any]:
     import pandas as pd
 
     ans = pd.json_normalize(raw, sep=sep).to_dict(orient="records")[0]
     assert isinstance(ans, dict)
     return ans
-
 
 @dataclasses.dataclass
 class ValidationGenerationsLogger:
@@ -289,22 +254,17 @@ class ValidationGenerationsLogger:
         self._log_generations_to_wandb(samples, step, wandb)
 
     def _log_generations_to_wandb(self, samples, step, wandb):
-        """Log samples to wandb as a table"""
 
-        # Create column names for all samples
         columns = ["step"] + sum(
             [[f"input_{i + 1}", f"output_{i + 1}", f"score_{i + 1}"] for i in range(len(samples))], []
         )
 
         if not hasattr(self, "validation_table"):
-            # Initialize the table on first call
+
             self.validation_table = wandb.Table(columns=columns)
 
-        # Create a new table with same columns and existing data
-        # Workaround for https://github.com/wandb/wandb/issues/2981#issuecomment-1997445737
         new_table = wandb.Table(columns=columns, data=self.validation_table.data)
 
-        # Add new row with all data
         row_data = []
         row_data.append(step)
         for sample in samples:
@@ -312,28 +272,22 @@ class ValidationGenerationsLogger:
 
         new_table.add_data(*row_data)
 
-        # Update reference and log
         wandb.log({"val/generations": new_table}, step=step)
         self.validation_table = new_table
 
     def log_generations_to_swanlab(self, samples, step):
-        """Log samples to swanlab as text"""
         import swanlab
 
         swanlab_table = swanlab.echarts.Table()
 
-        # Create column names
         headers = ["step", "input", "output", "score"]
 
         swanlab_row_list = [[step, *sample] for sample in samples]
         swanlab_table.add(headers=headers, rows=swanlab_row_list)
 
-        # Log to swanlab
         swanlab.log({"val/generations": swanlab_table}, step=step)
 
     def log_generations_to_mlflow(self, samples, step):
-        """Log validation generation to mlflow as artifacts"""
-        # https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html?highlight=log_artifact#mlflow.log_artifact
 
         import json
         import tempfile
@@ -354,7 +308,6 @@ class ValidationGenerationsLogger:
             print(f"WARNING: save validation generation file to mlflow failed with error {e}")
 
     def log_generations_to_clearml(self, samples, step):
-        """Log validation generation to clearml as table"""
 
         import clearml
         import pandas as pd
@@ -382,8 +335,7 @@ class ValidationGenerationsLogger:
         )
 
     def log_generations_to_tensorboard(self, samples, step):
-        """Log samples to tensorboard as text"""
-        # Initialize tensorboard writer if not exists
+
         if not hasattr(self, "writer"):
             from torch.utils.tensorboard import SummaryWriter
 
@@ -391,13 +343,11 @@ class ValidationGenerationsLogger:
             os.makedirs(tensorboard_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=tensorboard_dir)
 
-        # Format the samples data into readable text
         text_content = f"**Generation Results - Step {step}**\n\n"
 
         for i, sample in enumerate(samples):
             text_content += f"### Sample {i + 1}\n"
 
-            # Assuming sample contains [input, output, score]
             if len(sample) >= 3:
                 input_text, output_text, score = sample[0], sample[1], sample[2]
 
@@ -405,12 +355,11 @@ class ValidationGenerationsLogger:
                 text_content += f"**Output:** {output_text}\n\n"
                 text_content += f"**Score:** {score}\n\n"
             else:
-                # Handle cases where sample format might be different
+
                 text_content += f"**Data:** {sample}\n\n"
 
             text_content += "---\n\n"
 
-        # Log to tensorboard as text
         self.writer.add_text("val/generations", text_content, step)
-        # Flush to ensure data is written
+
         self.writer.flush()

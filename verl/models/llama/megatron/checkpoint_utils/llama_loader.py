@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import time
 
@@ -19,14 +7,7 @@ import torch.distributed as dist
 
 from verl.utils.device import get_device_id, get_torch_device
 
-
 def _megatron_calc_layer_map(config):
-    """Calculate the mapping of global layer_idx to local layer_idx
-    Returns:
-        layer_map (Dict: int -> tuple(int, int, int)):
-            mapping from the global layer index to
-            a tuple of (pp_rank, virtual_pp_rank, layer_idx inside model)
-    """
     from megatron.core import mpu
 
     print(f"get megatron data parallel size: {mpu.get_data_parallel_world_size()}")
@@ -51,11 +32,9 @@ def _megatron_calc_layer_map(config):
                 )
     return layer_map
 
-
 def load_state_dict_to_megatron_llama(
     state_dict, wrapped_models, config, params_dtype, is_value_model=False, tie_word_embeddings=False
 ):
-    """Load merged state_dict to sharded Megatron module in training."""
     from megatron.core import DistributedDataParallel as LocalDDP
     from megatron.core import mpu
     from megatron.core.transformer.module import Float16Module
@@ -104,13 +83,11 @@ def load_state_dict_to_megatron_llama(
         assert len(gpt_model_module.model.layers) == num_layers_per_model
 
     def _fetch_tensor(tensor, name) -> torch.Tensor:
-        """fetch tensor"""
         nonlocal state_dict
         if tensor is not None:
             tensor.data.copy_(state_dict[name])
 
     def _fetch_tp_shard_tensor_vocab(tensor, name, chunk_dim=0, mutate_func=None) -> torch.Tensor:
-        """fetch tensor in tp shards"""
         nonlocal state_dict
         tp_rank = mpu.get_tensor_model_parallel_rank()
         tp_size = mpu.get_tensor_model_parallel_world_size()
@@ -126,7 +103,6 @@ def load_state_dict_to_megatron_llama(
             print(f"tp_shard tensor:[{name}] not in state_dict, skip loading")
 
     def _fetch_tp_shard_tensor(tensor, name, chunk_dim=0, mutate_func=None) -> torch.Tensor:
-        """fetch tensor in tp shards"""
         nonlocal state_dict
         tp_rank = mpu.get_tensor_model_parallel_rank()
         tp_size = mpu.get_tensor_model_parallel_world_size()
@@ -142,7 +118,6 @@ def load_state_dict_to_megatron_llama(
             print(f"tp_shard tensor:[{name}] not in state_dict, skip loading")
 
     def _fetch_tp_shard_tensor_gate_up(tensor, gate_name, up_name) -> torch.Tensor:
-        """fetch gate_up tensor in tp shards"""
         nonlocal state_dict
         nonlocal mp_group
         tp_rank = mpu.get_tensor_model_parallel_rank()
@@ -168,7 +143,6 @@ def load_state_dict_to_megatron_llama(
             print(f"tp_shard tensor:[{gate_name}, {up_name}] not in state_dict, skip loading")
 
     def _fetch_tp_shard_tensor_qkv(tensor, q_name, k_name, v_name) -> torch.Tensor:
-        """fetch tensor in tp shards across mp_group"""
         nonlocal state_dict
         nonlocal mp_group
         tp_rank = mpu.get_tensor_model_parallel_rank()
@@ -212,8 +186,6 @@ def load_state_dict_to_megatron_llama(
         if tensor is not None:
             tensor.data.copy_(tensor_chunk[tp_rank])
 
-    # Embeddings
-    # -------------------
     print_rank_0("loading embeddings...")
     gpt_model_module = _get_gpt_model(models[0])
     embed_tokens_weight = None
@@ -221,8 +193,6 @@ def load_state_dict_to_megatron_llama(
         embed_tokens_weight = gpt_model_module.model.embed_tokens.weight
     _fetch_tp_shard_tensor_vocab(embed_tokens_weight, "model.embed_tokens.weight")
 
-    # Transformer layers
-    # -------------------
     layer_map = _megatron_calc_layer_map(config)
 
     pp_rank = mpu.get_pipeline_model_parallel_rank()
@@ -286,8 +256,7 @@ def load_state_dict_to_megatron_llama(
             f"{layer_name}.mlp.down_proj.weight",
             chunk_dim=1,
         )
-    # Final Layernorm
-    # -------------------
+
     print_rank_0("loading final layernorm...")
     gpt_model_module = _get_gpt_model(models[-1])
     _fetch_tensor(

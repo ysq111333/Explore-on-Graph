@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import random
 
@@ -21,7 +9,6 @@ from tensordict import TensorDict
 
 from verl import DataProto
 from verl.protocol import union_numpy_dict, union_tensor_dict
-
 
 def test_union_tensor_dict():
     obs = torch.randn(100, 10)
@@ -49,7 +36,6 @@ def test_union_tensor_dict():
     with pytest.raises(AssertionError):
         union_numpy_dict(a, b_)
 
-
 def test_tensor_dict_constructor():
     obs = torch.randn(100, 10)
     act = torch.randn(100, 10, 3)
@@ -62,7 +48,6 @@ def test_tensor_dict_constructor():
 
     with pytest.raises(AssertionError):
         data = DataProto.from_dict(tensors={"obs": obs, "act": act}, num_batch_dims=3)
-
 
 def test_tensor_dict_make_iterator():
     obs = torch.randn(100, 10)
@@ -92,7 +77,6 @@ def test_tensor_dict_make_iterator():
             print(data1.non_tensor_batch["labels"])
             print(data2.non_tensor_batch["labels"])
 
-
 def test_reorder():
     obs = torch.tensor([1, 2, 3, 4, 5, 6])
     labels = ["a", "b", "c", "d", "e", "f"]
@@ -102,7 +86,6 @@ def test_reorder():
     assert torch.all(torch.eq(data.batch["obs"], torch.tensor([4, 5, 3, 1, 2, 6])))
     assert np.all(data.non_tensor_batch["labels"] == np.array(["d", "e", "c", "a", "b", "f"]))
     assert data.meta_info == {"name": "abdce"}
-
 
 def test_chunk_concat():
     obs = torch.tensor([1, 2, 3, 4, 5, 6])
@@ -127,7 +110,6 @@ def test_chunk_concat():
     assert np.all(concat_data.non_tensor_batch["labels"] == data.non_tensor_batch["labels"])
     assert concat_data.meta_info == data.meta_info
 
-
 def test_pop():
     obs = torch.randn(100, 10)
     act = torch.randn(100, 3)
@@ -140,14 +122,12 @@ def test_pop():
     assert dataset.batch.keys() == {"act"}
     assert dataset.meta_info.keys() == {"1"}
 
-
 def test_repeat():
-    # Create a DataProto object with some batch and non-tensor data
+
     obs = torch.tensor([[1, 2], [3, 4], [5, 6]])
     labels = ["a", "b", "c"]
     data = DataProto.from_dict(tensors={"obs": obs}, non_tensors={"labels": labels}, meta_info={"info": "test_info"})
 
-    # Test interleave=True
     repeated_data_interleave = data.repeat(repeat_times=2, interleave=True)
     expected_obs_interleave = torch.tensor([[1, 2], [1, 2], [3, 4], [3, 4], [5, 6], [5, 6]])
     expected_labels_interleave = ["a", "a", "b", "b", "c", "c"]
@@ -156,7 +136,6 @@ def test_repeat():
     assert (repeated_data_interleave.non_tensor_batch["labels"] == expected_labels_interleave).all()
     assert repeated_data_interleave.meta_info == {"info": "test_info"}
 
-    # Test interleave=False
     repeated_data_no_interleave = data.repeat(repeat_times=2, interleave=False)
     expected_obs_no_interleave = torch.tensor([[1, 2], [3, 4], [5, 6], [1, 2], [3, 4], [5, 6]])
     expected_labels_no_interleave = ["a", "b", "c", "a", "b", "c"]
@@ -164,7 +143,6 @@ def test_repeat():
     assert torch.all(torch.eq(repeated_data_no_interleave.batch["obs"], expected_obs_no_interleave))
     assert (repeated_data_no_interleave.non_tensor_batch["labels"] == expected_labels_no_interleave).all()
     assert repeated_data_no_interleave.meta_info == {"info": "test_info"}
-
 
 def test_dataproto_pad_unpad():
     obs = torch.tensor([[1, 2], [3, 4], [5, 6]])
@@ -217,7 +195,6 @@ def test_dataproto_pad_unpad():
     assert (unpadd_data.non_tensor_batch["labels"] == labels).all()
     assert unpadd_data.meta_info == {"info": "test_info"}
 
-
 def test_dataproto_fold_unfold():
     from verl.protocol import DataProto, fold_batch_dim, unfold_batch_dim
 
@@ -240,7 +217,6 @@ def test_dataproto_fold_unfold():
     assert (data3.non_tensor_batch["labels"] == ["b", "b", "c", "c", "a", "a"]).all()
     assert data3.meta_info == {"info": "test_info"}
 
-
 def test_torch_save_data_proto():
     obs = torch.tensor([[1, 2], [3, 4], [5, 6]])
     labels = ["a", "b", "c"]
@@ -255,7 +231,6 @@ def test_torch_save_data_proto():
     import os
 
     os.remove("test_data.pt")
-
 
 def test_len():
     obs = torch.tensor([[1, 2], [3, 4], [5, 6]])
@@ -275,7 +250,6 @@ def test_len():
     data = DataProto(batch=None, non_tensor_batch=None, meta_info={"info": "test_info"})
 
     assert len(data) == 0
-
 
 def test_dataproto_index():
     data_len = 100
@@ -340,15 +314,12 @@ def test_dataproto_index():
     assert np.array_equal(result_list_bool.batch["obs"].cpu().numpy(), obs[idx_list_bool].cpu().numpy())
     assert np.array_equal(result_list_bool.non_tensor_batch["labels"], labels_np[idx_list_bool])
 
-
 def test_old_vs_new_from_single_dict():
     class CustomProto(DataProto):
-        """Uses the new, fixed from_single_dict."""
 
         pass
 
     class OriginProto(DataProto):
-        """Mimics the *old* from_single_dict (always returns a DataProto)."""
 
         @classmethod
         def from_single_dict(cls, data, meta_info=None, auto_padding=False):
@@ -358,7 +329,7 @@ def test_old_vs_new_from_single_dict():
                     tensors[k] = v
                 else:
                     non_tensors[k] = v
-            # always calls DataProto.from_dict, ignoring `cls`
+
             return DataProto.from_dict(
                 tensors=tensors,
                 non_tensors=non_tensors,
@@ -369,14 +340,13 @@ def test_old_vs_new_from_single_dict():
     sample = {"x": torch.tensor([0])}
 
     orig = OriginProto.from_single_dict(sample)
-    # old behavior: always DataProto, not a CustomOriginProto
+
     assert type(orig) is DataProto
     assert type(orig) is not OriginProto
 
     cust = CustomProto.from_single_dict(sample)
-    # new behavior: respects subclass
-    assert type(cust) is CustomProto
 
+    assert type(cust) is CustomProto
 
 def test_dataproto_no_batch():
     labels = ["a", "b", "c"]
@@ -387,14 +357,12 @@ def test_dataproto_no_batch():
     assert (pop_data.non_tensor_batch["labels"] == labels).all()
     assert data.non_tensor_batch == {}
 
-
 def test_sample_level_repeat():
-    # Create a DataProto object with some batch and non-tensor data
+
     obs = torch.tensor([[1, 2], [3, 4], [5, 6]])
     labels = ["a", "b", "c"]
     data = DataProto.from_dict(tensors={"obs": obs}, non_tensors={"labels": labels}, meta_info={"info": "test_info"})
 
-    # list
     repeated_data_interleave = data.sample_level_repeat(repeat_times=[3, 1, 2])
     expected_obs_interleave = torch.tensor([[1, 2], [1, 2], [1, 2], [3, 4], [5, 6], [5, 6]])
     expected_labels_interleave = ["a", "a", "a", "b", "c", "c"]
@@ -403,7 +371,6 @@ def test_sample_level_repeat():
     assert (repeated_data_interleave.non_tensor_batch["labels"] == expected_labels_interleave).all()
     assert repeated_data_interleave.meta_info == {"info": "test_info"}
 
-    # torch.tensor
     repeated_data_no_interleave = data.sample_level_repeat(repeat_times=torch.tensor([1, 2, 3]))
     expected_obs_no_interleave = torch.tensor([[1, 2], [3, 4], [3, 4], [5, 6], [5, 6], [5, 6]])
     expected_labels_no_interleave = ["a", "b", "b", "c", "c", "c"]
@@ -411,7 +378,6 @@ def test_sample_level_repeat():
     assert torch.all(torch.eq(repeated_data_no_interleave.batch["obs"], expected_obs_no_interleave))
     assert (repeated_data_no_interleave.non_tensor_batch["labels"] == expected_labels_no_interleave).all()
     assert repeated_data_no_interleave.meta_info == {"info": "test_info"}
-
 
 def test_dataproto_unfold_column_chunks():
     obs1 = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
@@ -478,44 +444,37 @@ def test_dataproto_unfold_column_chunks():
     assert (ret.non_tensor_batch["labels"] == expect_labels).all()
     assert ret.meta_info == {"name": "abc"}
 
-
 def test_dataproto_chunk_after_index():
     data_len = 4
     obs = torch.randn(data_len, 4)
     labels = [f"label_{i}" for i in range(data_len)]
     data = DataProto.from_dict(tensors={"obs": obs}, non_tensors={"labels": labels}, meta_info={"name": "abc"})
 
-    # Test with boolean numpy array
     bool_mask = np.array([True, False, True, False])
     selected = data[bool_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)
-    assert all(isinstance(d, int) for d in selected.batch.batch_size)  # int or List[int]
+    assert all(isinstance(d, int) for d in selected.batch.batch_size)
 
-    # Test with integer numpy array
     int_mask = np.array([0, 2])
     selected = data[int_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)
     assert all(isinstance(d, int) for d in selected.batch.batch_size)
 
-    # Test with boolean list
     list_mask = [True, False, True, False]
     selected = data[list_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)
     assert all(isinstance(d, int) for d in selected.batch.batch_size)
 
-    # Test with list
     list_mask = [0, 2]
     selected = data[list_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)
     assert all(isinstance(d, int) for d in selected.batch.batch_size)
 
-    # Test with torch tensor (bool)
     torch_bool_mask = torch.tensor([True, False, True, False])
     selected = data[torch_bool_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)
     assert all(isinstance(d, int) for d in selected.batch.batch_size)
 
-    # Test with torch tensor (int)
     torch_int_mask = torch.tensor([0, 2])
     selected = data[torch_int_mask]
     assert isinstance(selected.batch.batch_size, torch.Size)

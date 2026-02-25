@@ -1,19 +1,6 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from verl.single_controller.base.worker import DistGlobalInfo, DistRankInfo, Worker
-
 
 class MegatronWorker(Worker):
     def __init__(self, cuda_visible_devices=None) -> None:
@@ -56,7 +43,6 @@ class MegatronWorker(Worker):
         from verl.utils.fs import copy_to_local
         from verl.utils.model import update_model_config
 
-        # Step 1: initialize the tokenizer
         self.local_path = copy_to_local(model_path)
         if tokenizer_or_path is None:
             self.tokenizer = hf_tokenizer(self.local_path, trust_remote_code=trust_remote_code)
@@ -74,10 +60,8 @@ class MegatronWorker(Worker):
             else:
                 self.tokenizer.chat_template = self.config.model.custom_chat_template
 
-        # Step 2: get the hf
         hf_config = AutoConfig.from_pretrained(self.local_path, trust_remote_code=trust_remote_code)
 
-        # Step 3: override the hf config
         override_config_kwargs = {
             "bos_token_id": self.tokenizer.bos_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,

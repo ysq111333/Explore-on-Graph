@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import argparse
 import os
@@ -29,7 +17,6 @@ from transformers import (
 )
 
 from verl.utils import hf_processor, hf_tokenizer
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="verl model merger")
@@ -79,30 +66,10 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-
 @dataclass
 class ModelMergerConfig:
-    """Configuration for model merger operations.
 
-    Args:
-        operation (str): Operation type - 'merge' or 'test'.
-        backend (str): Backend type for the model ('fsdp' or 'megatron').
-        target_dir (Optional[str]): Directory to save the merged huggingface model. Defaults to "tmp".
-        hf_upload_path (Optional[str]): Hugging Face repository ID to upload the model. Defaults to None.
-        private (bool): Whether to upload the model to a private Hugging Face repository. Defaults to False.
-        test_hf_dir (Optional[str]): Path to the reference Hugging Face model directory for testing. Defaults to None.
-        tie_word_embedding (bool): Whether to tie word embedding weights (currently only Megatron
-            supported). Defaults to False.
-        trust_remote_code (bool): Whether to trust remote code. Defaults to False.
-        is_value_model (bool): Whether the model is a value model (currently only Megatron
-            supported). Defaults to False.
-        local_dir (Optional[str]): Path to the saved model checkpoints. Defaults to None.
-        hf_model_config_path (Optional[str]): Path to HuggingFace model configuration files. Defaults to None.
-        hf_upload (bool): Whether to upload to HuggingFace (computed automatically). Not for initialization.
-        use_cpu_initialization (bool): Whether to use CPU initialization for large models. Defaults to False.
-    """
-
-    operation: str  # 'merge' or 'test'
+    operation: str
     backend: str
     target_dir: Optional[str] = "tmp"
     hf_upload_path: Optional[str] = None
@@ -122,7 +89,6 @@ class ModelMergerConfig:
             self.target_dir = None
             self.hf_upload_path = None
             self.private = False
-
 
 def generate_config_from_args(args: argparse.Namespace) -> ModelMergerConfig:
     common_config_args = {
@@ -149,7 +115,7 @@ def generate_config_from_args(args: argparse.Namespace) -> ModelMergerConfig:
         config = ModelMergerConfig(
             **common_config_args,
             test_hf_dir=args.test_hf_dir,
-            # the following args are not used by test operation
+
             target_dir=None,
             hf_upload_path=None,
             private=False,
@@ -158,28 +124,7 @@ def generate_config_from_args(args: argparse.Namespace) -> ModelMergerConfig:
         raise NotImplementedError(f"Unknown operation: {args.operation}")
     return config
 
-
 class BaseModelMerger(ABC):
-    """
-    Abstract base class for merging distributed model checkpoints into HuggingFace format.
-
-    This class provides common functionality for converting model checkpoints from different
-    distributed training backends (FSDP, Megatron) into standard HuggingFace format that
-    can be easily loaded and used for inference or further training.
-
-    The merger supports two main operations:
-    - merge: Convert and save checkpoints to HuggingFace format
-    - test: Validate merged checkpoints against a reference model
-
-    Args:
-        config (ModelMergerConfig): Configuration object containing paths, backend type,
-            and operation parameters.
-
-    Attributes:
-        config (ModelMergerConfig): The configuration object passed during initialization.
-        hf_model_config_path (str): Path to the HuggingFace model configuration files.
-        model_config (PretrainedConfig): Loaded HuggingFace model configuration.
-    """
 
     def __init__(self, config: ModelMergerConfig):
         self.config = config
@@ -199,12 +144,6 @@ class BaseModelMerger(ABC):
         raise NotImplementedError(f"Unknown architecture {self.model_config.architectures}")
 
     def patch_model_generation_config(self, model):
-        """
-        The generation_config created from model config may be different to the pretrained model,
-        this may lead to error when generating: https://github.com/volcengine/verl/issues/1246
-
-        This function patch the generation_config created from model config to the pretrained model.
-        """
         if model.can_generate():
             try:
                 model.generation_config = GenerationConfig.from_pretrained(self.hf_model_config_path)
@@ -216,15 +155,6 @@ class BaseModelMerger(ABC):
         return model
 
     def save_lora_adapter(self, state_dict: dict[str, torch.Tensor]):
-        """
-        Save lora adapter to safetensors.
-
-        Returns:
-            lora_path: str, the path to the lora adapter. None if no lora adapter found.
-
-        Note:
-            This function change the 'state_dict' in place.
-        """
         lora_params_names = [name for name in state_dict.keys() if "lora_" in name]
 
         if len(lora_params_names) == 0:
@@ -248,7 +178,7 @@ class BaseModelMerger(ABC):
         lora_rank = min(lora_params[lora_key].shape[0], lora_params[lora_key].shape[1])
         peft_dict = {
             "r": lora_rank,
-            "lora_alpha": 0,  # lora_alpha is not set. An error should be raised to inform the user to set it manually.
+            "lora_alpha": 0,
             "target_modules": list(target_modules),
         }
         peft_config = peft.LoraConfig(**peft_dict).to_dict()
@@ -306,10 +236,10 @@ class BaseModelMerger(ABC):
 
         api = HfApi()
         try:
-            # Attempt to create repository
+
             api.create_repo(repo_id=self.config.hf_upload_path, private=self.config.private, exist_ok=True)
         except HfHubHTTPError as e:
-            # Handle authentication/API errors
+
             if e.response.status_code == 401:
                 raise PermissionError(
                     "Hugging Face authentication failed. Verify your token is valid and has write permissions."
@@ -322,7 +252,7 @@ class BaseModelMerger(ABC):
             raise ConnectionError("Network connection failed. Check your internet connection.") from e
 
         try:
-            # Attempt folder upload
+
             api.upload_folder(folder_path=self.config.target_dir, repo_id=self.config.hf_upload_path, repo_type="model")
         except HfHubHTTPError as e:
             if e.response.status_code == 401:

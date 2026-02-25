@@ -1,16 +1,5 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
+
 import asyncio
 import json
 import logging
@@ -27,7 +16,6 @@ from verl.utils.rollout_trace import rollout_trace_op
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
 @register("tool_agent")
 class ToolAgentLoop(AgentLoopBase):
     @classmethod
@@ -37,7 +25,6 @@ class ToolAgentLoop(AgentLoopBase):
         cls._class_initialized = True
         print("Performing class-level ToolAgentLoop initialization")
 
-        # Initialize tools from config file
         cls.tokenizer = tokenizer
         cls.max_user_turns = config.actor_rollout_ref.rollout.multi_turn.max_user_turns
         cls.max_assistant_turns = config.actor_rollout_ref.rollout.multi_turn.max_assistant_turns
@@ -77,24 +64,19 @@ class ToolAgentLoop(AgentLoopBase):
             response_mask += [1] * len(response_ids)
             assistant_turns += 1
 
-            # reach max response length
             if len(response_mask) >= self.response_length:
                 break
 
-            # reach max assistant turns
             if self.max_assistant_turns and assistant_turns >= self.max_assistant_turns:
                 break
 
-            # reach max user turns
             if self.max_user_turns and user_turns >= self.max_user_turns:
                 break
 
-            # no tool calls
             _, tool_calls = await self.tool_parser.extract_tool_calls(response_ids)
             if not tool_calls:
                 break
 
-            # call tools
             tasks = []
             for tool_call in tool_calls[: self.max_parallel_calls]:
                 tasks.append(self._call_tool(tool_call))
@@ -103,7 +85,6 @@ class ToolAgentLoop(AgentLoopBase):
             if any(isinstance(item, Exception) for item in tool_responses):
                 break
 
-            # append tool_response_ids
             tool_response_ids = await self.loop.run_in_executor(
                 None,
                 lambda messages=tool_responses: self.tokenizer.apply_chat_template(
@@ -112,8 +93,6 @@ class ToolAgentLoop(AgentLoopBase):
             )
             tool_response_ids = tool_response_ids[len(self.system_prompt) :]
 
-            # NOTE: last turn should not be user turn, or the EOS token reward
-            # can't be propagated to previous token in GAE.
             if len(response_mask) + len(tool_response_ids) >= self.response_length:
                 break
 
@@ -134,10 +113,9 @@ class ToolAgentLoop(AgentLoopBase):
         return output
 
     async def _call_tool(self, tool_call: FunctionCall) -> dict[str, str]:
-        """Call tool and return tool response."""
         tool, instance_id = None, None
         try:
-            # TODO: append malformed tool_call to the prompt: invalid function name or arguments
+
             tool_name = tool_call.name
             tool_args = json.loads(tool_call.arguments)
             tool = self.tools[tool_name]

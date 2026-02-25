@@ -1,17 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import time
 
@@ -26,37 +13,23 @@ from verl.utils.device import get_device_id, get_torch_device
 from verl.utils.logger import print_rank_0
 from verl.utils.megatron_utils import unwrap_model
 
-
 def _megatron_calc_global_rank(
     tp_rank: int = 0, dp_rank: int = 0, pp_rank: int = 0, cp_rank: int = 0, ep_rank: int = 0
 ):
-    """Calculate global rank with support for CP/EP parallelism"""
 
-    # Get parallel sizes for each dimension
     tp_size = mpu.get_tensor_model_parallel_world_size()
     dp_size = mpu.get_data_parallel_world_size()
     pp_size = mpu.get_pipeline_model_parallel_world_size()
     cp_size = mpu.get_context_parallel_world_size()
-    # ep_size = mpu.get_expert_model_parallel_world_size()
 
-    # Verify total GPU count matches (must be consistent with parallel_state.py)
     total_size = tp_size * dp_size * pp_size * cp_size
     assert total_size == torch.distributed.get_world_size(), (
         f"{tp_size}x{dp_size}x{pp_size}x{cp_size} != {torch.distributed.get_world_size()}"
     )
 
-    # Core calculation logic (corresponds to RankGenerator order parameter)
-    # Assumes default order is "tp-cp-ep-dp-pp"
     return ((pp_rank * dp_size + dp_rank) * cp_size + cp_rank) * tp_size + tp_rank
 
-
 def _megatron_calc_layer_map(config):
-    """Calculate the mapping of global layer_idx to local layer_idx
-    Returns:
-        layer_map (Dict: int -> tuple(int, int, int)):
-            mapping from the global layer index to
-            a tuple of (pp_rank, virtual_pp_rank, layer_idx inside model)
-    """
     from megatron.core import mpu
 
     pp_size = mpu.get_pipeline_model_parallel_world_size()
@@ -79,22 +52,7 @@ def _megatron_calc_layer_map(config):
                 )
     return layer_map
 
-
 def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=False, tie_word_embeddings=False):
-    """Merge sharded parameters of a Megatron module into a merged checkpoint.
-
-    Args:
-        wrapped_models (list of megatron.core.distributed.DistributedDataParallel):
-            The local DDP wrapped megatron modules.
-        config (str or None):
-            HF config for model
-        dtype: model params type
-        is_value_model: if model is value model
-        tie_word_embeddings: tie_word_embeddings
-    Returns:
-        state_dict (dict):
-            The merged state_dict in rank 0, and an empty dictionary in other ranks.
-    """
     start_time = time.time()
 
     def _get_gpt_model(model):
@@ -139,7 +97,6 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
         return tensor.detach().cpu()
 
     def _broadcast_tensor(tensor, name, src_pp_rank) -> torch.Tensor:
-        """broadcast tensor across mp_group"""
         nonlocal state_dict
         nonlocal mp_group
         src_rank = _megatron_calc_global_rank(tp_rank=0, dp_rank=0, pp_rank=src_pp_rank, cp_rank=cp_rank)
@@ -160,7 +117,7 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
         tensor_shape = obj_list[0]
 
         if tensor_shape is None:
-            # all or none ranks in the mp_group should reach here
+
             print_rank_0(f"tensor:[{name}] not exist, skip collect")
             return
 
@@ -178,10 +135,9 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
             state_dict[name] = _get_cpu_tensor(weight)
 
     def _broadcast_tp_shard_tensor(tensor, name, src_pp_rank, concat_dim=0, mutate_func=None) -> torch.Tensor:
-        """broadcast tensor in tp shards across mp_group"""
         nonlocal state_dict
         nonlocal mp_group
-        # tp_rank = mpu.get_tensor_model_parallel_rank()
+
         tp_size = mpu.get_tensor_model_parallel_world_size()
         src_rank = _megatron_calc_global_rank(tp_rank=0, dp_rank=0, pp_rank=src_pp_rank, cp_rank=cp_rank)
 
@@ -191,7 +147,7 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
         dist.broadcast_object_list(obj_list, src=src_rank, group=mp_group)
         chunk_shape = obj_list[0]
         if chunk_shape is None:
-            # all or none ranks in the mp_group should reach here
+
             print_rank_0(f"tp_shard tensor:[{name}] not exist, skip collecting")
             return
 
@@ -219,10 +175,9 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
             state_dict[name] = full_tensor
 
     def _broadcast_tp_shard_tensor_gate_up(tensor, gate_name, up_name, src_pp_rank) -> torch.Tensor:
-        """broadcast tensor in tp shards across mp_group"""
         nonlocal state_dict
         nonlocal mp_group
-        # tp_rank = mpu.get_tensor_model_parallel_rank()
+
         tp_size = mpu.get_tensor_model_parallel_world_size()
         src_rank = _megatron_calc_global_rank(tp_rank=0, dp_rank=0, pp_rank=src_pp_rank, cp_rank=cp_rank)
 
@@ -232,7 +187,7 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
         dist.broadcast_object_list(obj_list, src=src_rank, group=mp_group)
         chunk_shape = obj_list[0]
         if chunk_shape is None:
-            # all or none ranks in the mp_group should reach here
+
             print_rank_0(f"tp_shard tensor:[{gate_name, up_name}] not exist, skip collecting")
             return
 
@@ -269,10 +224,9 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
             state_dict[up_name] = torch.cat(up_weight_list, dim=0)
 
     def _broadcast_tp_shard_tensor_qkv(tensor, q_name, k_name, v_name, src_pp_rank):
-        """broadcast tensor in tp shards across mp_group"""
         nonlocal state_dict
         nonlocal mp_group
-        # tp_rank = mpu.get_tensor_model_parallel_rank()
+
         tp_size = mpu.get_tensor_model_parallel_world_size()
         src_rank = _megatron_calc_global_rank(tp_rank=0, dp_rank=0, pp_rank=src_pp_rank, cp_rank=cp_rank)
 
@@ -282,7 +236,7 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
         dist.broadcast_object_list(obj_list, src=src_rank, group=mp_group)
         chunk_shape = obj_list[0]
         if chunk_shape is None:
-            # all or none ranks in the mp_group should reach here
+
             print_rank_0(f"tp_shard tensor:[{q_name}] not exist, skip collecting")
             return
 
@@ -348,13 +302,10 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
             state_dict[k_name] = torch.cat(k_weight_list, dim=0)
             state_dict[v_name] = torch.cat(v_weight_list, dim=0)
 
-    # empty cache before collecting weights
     get_torch_device().empty_cache()
-    # Embeddings
-    # -------------------
-    if dp_rank == 0 and cp_rank == 0:  # models are identical across cp ranks
-        # Embeddings
-        # -------------------
+
+    if dp_rank == 0 and cp_rank == 0:
+
         print_rank_0("collecting embeddings...")
         gpt_model_module = _get_gpt_model(models[0])
         _broadcast_tp_shard_tensor(
@@ -363,8 +314,6 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
             src_pp_rank=0,
         )
 
-        # Transformer layers
-        # -------------------
         layer_map = _megatron_calc_layer_map(config)
         for layer in range(config.num_hidden_layers):
             print_rank_0(f"collecting layer #{layer}...")
@@ -436,8 +385,6 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
                 src_pp_rank=src_pp_rank,
             )
 
-        # Final Layernorm
-        # -------------------
         print_rank_0("collecting final layernorm...")
         gpt_model_module = _get_gpt_model(models[-1])
         _broadcast_tensor(
@@ -474,22 +421,18 @@ def merge_megatron_ckpt_gptmodel(wrapped_models, config, dtype, is_value_model=F
     print_rank_0(f"merge megatron ckpt done, time elapsed {time.time() - start_time}s")
     return state_dict
 
-
 def merge_megatron_ckpt_gptmodel_qwen_moe(
     wrapped_models, config, dtype, is_value_model=False, tie_word_embeddings=False
 ):
     raise NotImplementedError("merge_megatron_ckpt_gptmodel_qwen_moe is not implemented")
-
 
 def merge_megatron_ckpt_gptmodel_qwen2_5_vl(
     wrapped_models, config, dtype, is_value_model=False, tie_word_embeddings=False
 ):
     raise NotImplementedError("merge_megatron_ckpt_gptmodel_qwen2_5_vl is not implemented")
 
-
 def merge_megatron_ckpt_gptmodel_dpskv3(wrapped_models, config, dtype, is_value_model=False, tie_word_embeddings=False):
     raise NotImplementedError("merge_megatron_ckpt_gptmodel_dpskv3 is not implemented")
-
 
 def merge_megatron_ckpt_gptmodel_mixtral(
     wrapped_models, config, dtype, is_value_model=False, tie_word_embeddings=False

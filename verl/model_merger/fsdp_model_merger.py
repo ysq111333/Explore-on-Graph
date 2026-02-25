@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import json
 import os
@@ -22,7 +10,7 @@ import torch
 from torch.distributed._tensor import Placement, Shard
 
 try:
-    # for torch 2.5+
+
     from torch.distributed.tensor import DTensor
 except ImportError:
     from torch.distributed._tensor import DTensor
@@ -31,47 +19,9 @@ from tqdm import tqdm
 
 from .base_model_merger import BaseModelMerger
 
-
 class FSDPModelMerger(BaseModelMerger):
-    """
-    Model merger for FSDP (Fully Sharded Data Parallel) checkpoints.
-
-    This class handles the conversion of FSDP distributed checkpoints into HuggingFace format.
-    FSDP shards model parameters across multiple processes, and this merger reconstructs
-    the full model by loading and concatenating the sharded parameters from all ranks.
-
-    The merger supports various FSDP configurations including:
-    - Pure FSDP (single dimension sharding)
-    - FSDP + DDP (data parallel + fully sharded data parallel)
-    - DTensor-based sharding with custom device meshes
-
-    Key features:
-    - Automatic detection of world size from checkpoint filenames
-    - Support for DTensor and non-DTensor checkpoints
-    - Parallel loading of checkpoint shards for efficiency
-    - Validation against reference HuggingFace models
-
-    Example:
-        To merge FSDP checkpoints:
-        ```python
-        config = ModelMergerConfig(
-            operation="merge",
-            backend="fsdp",
-            local_dir="path/to/fsdp/checkpoints",
-            target_dir="path/to/output"
-        )
-        merger = FSDPModelMerger(config)
-        merger.merge_and_save()
-        ```
-    """
 
     def _get_world_size(self) -> int:
-        """_summary_
-        From FSDP json config file, extract the world size.
-
-        Returns:
-            int: world size
-        """
         config_path = Path(self.config.local_dir) / "fsdp_config.json"
         if not config_path.exists():
             raise FileNotFoundError(f"Config file {config_path} does not exist.")
@@ -79,7 +29,6 @@ class FSDPModelMerger(BaseModelMerger):
         with open(config_path) as f:
             config = json.load(f)
 
-        # Extract world size from the config
         world_size = config.get("world_size", None)
         if world_size is None:
             raise ValueError("World size not found in the config file.")
@@ -94,20 +43,16 @@ class FSDPModelMerger(BaseModelMerger):
         )
 
     def _extract_device_mesh_info(self, state_dict: dict, world_size: int) -> tuple[np.ndarray, tuple[str, ...]]:
-        """
-        Retrieves sharding information (device_mesh, mesh_dim_names) from a DTensor in the state_dict.
-        If no DTensor is found, infers a simple FSDP mesh based on world_size.
-        """
         pivot_key = sorted(list(state_dict.keys()))[0]
         weight = state_dict[pivot_key]
 
         if isinstance(weight, DTensor):
-            # get sharding info
+
             device_mesh = weight.device_mesh
             mesh = device_mesh.mesh
             mesh_dim_names = device_mesh.mesh_dim_names
         else:
-            # for non-DTensor
+
             mesh = np.array([world_size], dtype=np.int64)
             mesh_dim_names = ("fsdp",)
 
@@ -116,11 +61,10 @@ class FSDPModelMerger(BaseModelMerger):
     def _calculate_shard_configuration(
         self, mesh: np.ndarray, mesh_dim_names: tuple[str, ...]
     ) -> tuple[int, tuple[int, ...]]:
-        """Calculates the total number of shards and the shape of the device mesh."""
         assert mesh_dim_names in (("fsdp",), ("ddp", "fsdp")), f"Unsupported mesh_dim_names {mesh_dim_names}"
 
         if "tp" in mesh_dim_names:
-            # TODO: "tp" is not supported yet due to the above assert
+
             total_shards = mesh.shape[-1] * mesh.shape[-2]
             mesh_shape = (mesh.shape[-2], mesh.shape[-1])
         else:
@@ -130,7 +74,6 @@ class FSDPModelMerger(BaseModelMerger):
         return total_shards, mesh_shape
 
     def _merge_by_placement(self, tensors: list[torch.Tensor], placement: Placement) -> torch.Tensor:
-        """Merges a list of tensors based on their DTensor placement"""
         if placement.is_replicate():
             return tensors[0]
         elif placement.is_partial():
@@ -156,20 +99,19 @@ class FSDPModelMerger(BaseModelMerger):
             for future in tqdm(futures, desc=f"Loading {total_shards} FSDP shards", total=total_shards):
                 future.result()
 
-        # Merge state dicts from all shards
         state_dict = {}
         param_placements: dict[str, list] = {}
 
         for key in set(model_state_dict_lst[0].keys()):
             state_dict[key] = []
             for model_state_shard in model_state_dict_lst:
-                # add tensor shard in order of rank to state_dict[key]
+
                 tensor = model_state_shard.pop(key)
                 if isinstance(tensor, DTensor):
                     state_dict[key].append(tensor._local_tensor.bfloat16())
 
                     placements = tuple(tensor.placements)
-                    # replicated placement at dp dimension can be discarded
+
                     if mesh_dim_names[0] in ("dp", "ddp"):
                         placements = placements[1:]
 
@@ -182,21 +124,20 @@ class FSDPModelMerger(BaseModelMerger):
 
         del model_state_dict_lst
 
-        # Merge tensors
         for key in sorted(state_dict):
             if not isinstance(state_dict[key], list):
                 print(f"No need to merge key {key}")
                 continue
             if key in param_placements:
-                # merge shards
+
                 placements: tuple[Shard] = param_placements[key]
                 if len(mesh_shape) == 1:
-                    # 1-D list, FSDP without TP
+
                     assert len(placements) == 1
                     shards = state_dict[key]
                     state_dict[key] = self._merge_by_placement(shards, placements[0])
                 else:
-                    # 2-D list, FSDP + TP
+
                     raise NotImplementedError("FSDP + TP is not supported yet")
             else:
                 state_dict[key] = torch.cat(state_dict[key], dim=0)
@@ -260,6 +201,5 @@ class FSDPModelMerger(BaseModelMerger):
         print("FSDP checks passed: The merged state_dict matches the hf model saved by FSDPCheckpointManager.")
 
     def cleanup(self):
-        """Cleanup temporary files if needed."""
-        # FSDP merger does not create temporary files, so no cleanup is needed.
+
         pass

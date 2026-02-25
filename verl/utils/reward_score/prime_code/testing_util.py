@@ -1,40 +1,23 @@
-# Copyright 2024 PRIME team and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import ast
 import faulthandler
 import json
 import platform
 
-# to run the solution files we're using a timing based approach
 import signal
 import sys
 import traceback
 
-# used for debugging to time steps
 from datetime import datetime
 from enum import Enum
 
-# for capturing the stdout
 from io import StringIO
 
-# used for testing the code that reads from input
 from unittest.mock import mock_open, patch
 
 import numpy as np
 from pyext import RuntimeModule
-
 
 def truncatefn(s, length=300):
     assert isinstance(s, str)
@@ -43,54 +26,40 @@ def truncatefn(s, length=300):
 
     return s[: length // 2] + "...(truncated) ..." + s[-length // 2 :]
 
-
 class CODE_TYPE(Enum):
     call_based = 0
     standard_input = 1
 
-
-# used to capture stdout as a list
-# from https://stackoverflow.com/a/16571630/6416660
-# alternative use redirect_stdout() from contextlib
 class Capturing(list):
     def __enter__(self):
         self._stdout = sys.stdout
         sys.stdout = self._stringio = StringIO()
-        # Make closing the StringIO a no-op
+
         self._stringio.close = lambda x: 1
         return self
 
     def __exit__(self, *args):
         self.append(self._stringio.getvalue())
-        del self._stringio  # free up some memory
+        del self._stringio
         sys.stdout = self._stdout
-
 
 def only_int_check(val):
     return isinstance(val, int)
 
-
 def string_int_check(val):
     return isinstance(val, str) and val.isdigit()
-
 
 def combined_int_check(val):
     return only_int_check(val) or string_int_check(val)
 
-
 def clean_traceback(error_traceback):
     file_start = error_traceback.find('File "<string>"')
-    # print(file_start)
+
     error_traceback = "Traceback (most recent call last):\n  " + error_traceback[file_start:]
     return error_traceback
 
-
 def run_test(in_outs, test=None, debug=False, timeout=15):
-    """
-    if test(generated_code) is not None it'll try to run the code.
-    otherwise it'll just return an input and output pair.
-    """
-    # Disable functionalities that can make destructive changes to the test.
+
     reliability_guard()
 
     if debug:
@@ -98,10 +67,10 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
 
     if in_outs:
         if in_outs.get("fn_name") is None:
-            which_type = CODE_TYPE.standard_input  # Standard input
+            which_type = CODE_TYPE.standard_input
             method_name = None
         else:
-            which_type = CODE_TYPE.call_based  # Call-based
+            which_type = CODE_TYPE.call_based
             method_name = in_outs["fn_name"]
 
     if debug:
@@ -111,7 +80,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
         raise AssertionError("should not happen: test code is none")
     elif test is not None:
         results = []
-        sol = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(6*10**5)\n"  # noqa: E501
+        sol = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(6*10**5)\n"
         if debug:
             print(f"loading test code = {datetime.now().time()}")
 
@@ -132,15 +101,13 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                 results.append(-2)
                 return results, {
                     "error": repr(e),
-                    # "error_code": -1,
-                    # "error_message": "Compilation Error",
+
                     "traceback": clean_traceback(error_traceback),
                 }
             signal.alarm(0)
 
         elif which_type == CODE_TYPE.standard_input:
-            # sol
-            # if code has if __name__ == "__main__": then remove it
+
             try:
                 astree = ast.parse(test)
                 last_block = astree.body[-1]
@@ -192,8 +159,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                 results.append(-2)
                 return results, {
                     "error": repr(e),
-                    # "error_code": -1,
-                    # "error_message": "Compilation Error",
+
                     "traceback": clean_traceback(error_traceback),
                 }
             signal.alarm(0)
@@ -201,7 +167,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
             print(f"get method = {datetime.now().time()}")
 
         try:
-            method = getattr(tmp, method_name)  # get_attr second arg must be str
+            method = getattr(tmp, method_name)
         except Exception:
             signal.alarm(0)
             error_traceback = traceback.format_exc()
@@ -210,8 +176,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
             results.append(-2)
             return results, {
                 "error": repr(error_info),
-                # "error_code": -1,
-                # "error_message": "Unable to extract code",
+
                 "traceback": clean_traceback(error_traceback),
             }
 
@@ -230,7 +195,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
             else:
                 raw_inputs = truncatefn(raw_inputs)
                 raw_outputs = truncatefn(raw_outputs, 200)
-            # JSON forces dictionaries to have string keys; this undoes this (assuming a singleton list)
+
             try:
                 if isinstance(inputs[0], dict):
                     inputs = [{int(k): v for k, v in inputs[0].items()}]
@@ -252,7 +217,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     f"time: {datetime.now().time()} testing index = {index}  inputs = {inputs}, {type(inputs)}. "
                     f"type = {which_type}"
                 )
-            if which_type == CODE_TYPE.call_based:  # Call-based
+            if which_type == CODE_TYPE.call_based:
                 signal.alarm(timeout)
                 faulthandler.enable()
                 try:
@@ -262,7 +227,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     raw_true_output_copy = json.dumps(output)
                     raw_true_output_copy = truncatefn(raw_true_output_copy, 200)
 
-                    # ground truth sequences are not tuples
                     if isinstance(output, tuple):
                         output = list(output)
 
@@ -270,7 +234,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     if isinstance(in_outs["outputs"][index], list) and in_outs["outputs"][index]:
                         tmp_result = tmp_result or (output == in_outs["outputs"][index][0])
 
-                    # ground truth sequences are not tuples
                     try:
                         if isinstance(output[0], tuple):
                             tmp_result = tmp_result or ([list(x) for x in output] == in_outs["outputs"][index][0])
@@ -282,10 +245,10 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                             "output": raw_true_output_copy,
                             "expected": raw_outputs,
                             "inputs": raw_inputs,
-                            # "error_code": -2,
+
                             "error_message": "Wrong Answer",
                         }
-                    # reset the alarm
+
                     signal.alarm(0)
                 except Exception as e:
                     signal.alarm(0)
@@ -305,7 +268,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                         f"outputs = {output}, test outputs = {in_outs['outputs'][index]}, inputs = {inputs}, "
                         f"{type(inputs)}, {output == [in_outs['outputs'][index]]}"
                     )
-            elif which_type == CODE_TYPE.standard_input:  # Standard input
+            elif which_type == CODE_TYPE.standard_input:
                 faulthandler.enable()
                 passed = False
 
@@ -318,11 +281,11 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                 with Capturing() as output:
                     try:
                         call_method(method, inputs)
-                        # reset the alarm
+
                         signal.alarm(0)
                         passed = True
                     except Exception as e:
-                        # runtime error or took too long
+
                         signal.alarm(0)
                         error_traceback = traceback.format_exc()
                         print(f"Call-based runtime error or time limit exceeded error = {repr(e)}{e}")
@@ -359,7 +322,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     results.append(tmp_result)
                     continue
 
-                # ground truth sequences are expressed as lists not tuples
                 if isinstance(output, tuple):
                     output = list(output)
 
@@ -379,7 +341,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     results.append(tmp_result)
                     continue
 
-                # try one more time without \n
                 if isinstance(in_outs["outputs"][index], list):
                     for tmp_index, i in enumerate(in_outs["outputs"][index]):
                         in_outs["outputs"][index][tmp_index] = i.split("\n")
@@ -404,7 +365,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                     results.append(tmp_result)
                     continue
 
-                # try by converting the output into a split up list too
                 if isinstance(output, list):
                     output = list(filter(len, output))
 
@@ -482,7 +442,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
 
                 if debug:
                     print(f"{tmp_result=} @d")
-                # try by converting the stuff into split up list
+
                 if isinstance(in_outs["outputs"][index], list):
                     for tmp_index, i in enumerate(in_outs["outputs"][index]):
                         in_outs["outputs"][index][tmp_index] = set(i.split())
@@ -506,7 +466,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                 if debug:
                     print(f"{tmp_result=} @f")
 
-                # try by converting the output into a split up list too
                 if isinstance(output, list):
                     for tmp_index, i in enumerate(output):
                         output[tmp_index] = i.split()
@@ -530,7 +489,7 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
                         "output": raw_true_output_copy,
                         "expected": raw_outputs,
                         "inputs": raw_inputs,
-                        # "error_code": -2,
+
                         "error_message": "Wrong Answer",
                     }
 
@@ -552,7 +511,6 @@ def run_test(in_outs, test=None, debug=False, timeout=15):
 
     return results, {}
 
-
 def custom_compare_(output, ground_truth):
     if isinstance(output, list):
         output_1 = "\n".join(output)
@@ -567,12 +525,10 @@ def custom_compare_(output, ground_truth):
 
     return False
 
-
 def stripped_string_compare(s1, s2):
     s1 = s1.lstrip().rstrip()
     s2 = s2.lstrip().rstrip()
     return s1 == s2
-
 
 def call_method(method, inputs):
     if isinstance(inputs, list):
@@ -580,15 +536,12 @@ def call_method(method, inputs):
 
     inputs_line_iterator = iter(inputs.split("\n"))
 
-    # sys.setrecursionlimit(10000)
-
-    # @patch('builtins.input', side_effect=inputs.split("\n"))
     @patch("builtins.open", mock_open(read_data=inputs))
     @patch("sys.stdin", StringIO(inputs))
     @patch("sys.stdin.readline", lambda *args: next(inputs_line_iterator))
     @patch("sys.stdin.readlines", lambda *args: inputs.split("\n"))
     @patch("sys.stdin.read", lambda *args: inputs)
-    # @patch('sys.stdout.write', print)
+
     def _inner_call_method(_method):
         try:
             return _method()
@@ -599,18 +552,7 @@ def call_method(method, inputs):
 
     return _inner_call_method(method)
 
-
 def reliability_guard(maximum_memory_bytes=None):
-    """
-    This disables various destructive functions and prevents the generated code
-    from interfering with the test (e.g. fork bomb, killing other processes,
-    removing filesystem files, etc.)
-    WARNING
-    This function is NOT a security sandbox. Untrusted code, including, model-
-    generated code, should not be blindly executed outside of one. See the
-    Codex paper for more information about OpenAI's code sandbox, and proceed
-    with caution.
-    """
 
     if maximum_memory_bytes is not None:
         import resource
@@ -632,7 +574,7 @@ def reliability_guard(maximum_memory_bytes=None):
     os.environ["OMP_NUM_THREADS"] = "1"
 
     os.kill = None
-    os.system = None  # 防止干扰repl评测
+    os.system = None
     os.putenv = None
     os.remove = None
     os.removedirs = None
@@ -666,7 +608,7 @@ def reliability_guard(maximum_memory_bytes=None):
 
     import subprocess
 
-    subprocess.Popen = None  # type: ignore
+    subprocess.Popen = None
 
     __builtins__["help"] = None
 
@@ -678,6 +620,5 @@ def reliability_guard(maximum_memory_bytes=None):
     sys.modules["psutil"] = None
     sys.modules["tkinter"] = None
 
-    # Disable some built-in functions that can be destructive
     for mod in ["subprocess", "ctypes"]:
         sys.modules[mod] = None

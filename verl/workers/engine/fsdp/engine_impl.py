@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-The concrete Engine implementation using PyTorch FullyShardedDataParallel (FSDP)
-"""
+
 
 import gc
 import itertools
@@ -75,30 +60,15 @@ from .utils import create_device_mesh, get_sharding_strategy
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-
 device_name = get_device_name()
-
 
 @EngineRegistry.register("fsdp")
 class FSDPEngine(BaseEngine):
-    """
-    Concrete Engine implementation using PyTorch FullyShardedDataParallel (FSDP).
-
-    Supports model sharding, activation/optimizer offloading, LoRA, and sequence parallelism.
-    """
 
     def __init__(self, config):
-        """
-        Initialize the FSDPEngine.
-
-        Sets up distributed device meshes, LoRA, and offload policies based on config.
-
-        Args:
-            config: Configuration object with FSDP and model settings.
-        """
         self.config = config
         self.rank = torch.distributed.get_rank()
-        # build device mesh for Ulysses Sequence Parallel
+
         world_size = torch.distributed.get_world_size()
         from torch.distributed.device_mesh import init_device_mesh
 
@@ -116,11 +86,9 @@ class FSDPEngine(BaseEngine):
 
         self.ulysses_sharding_manager = FSDPUlyssesShardingManager(self.ulysses_device_mesh)
 
-        # set FSDP offload params
         self._is_offload_param = self.config.model.fsdp_config.param_offload
         self._is_offload_optimizer = self.config.model.fsdp_config.optimizer_offload
 
-        # normalize config
         self.config.ppo_mini_batch_size *= self.config.rollout_n
         self.config.ppo_mini_batch_size //= torch.distributed.get_world_size() // self.ulysses_sequence_parallel_size
         if self.config.ppo_micro_batch_size is not None:
@@ -145,13 +113,7 @@ class FSDPEngine(BaseEngine):
         self._is_lora = self.config.model.get("lora_rank", 0) > 0
 
     def init_model(self):
-        """
-        Build the model, optimizer, and learning rate scheduler under FSDP.
 
-        Applies device, dtype, and precision configurations, including mixed precision.
-        Sets up checkpoint manager and FLOPs counter.
-        """
-        # This is used to import external_lib into the huggingface systems
         import_external_libs(self.config.model.get("external_lib", None))
 
         self.module, self.optimizer, self.lr_scheduler = self._build_model_optimizer(self.config)
@@ -173,7 +135,7 @@ class FSDPEngine(BaseEngine):
         )
 
     def _build_model_optimizer(self, config):
-        # the following line is necessary
+
         from torch import optim
         from torch.distributed.fsdp import MixedPrecision
 
@@ -182,8 +144,6 @@ class FSDPEngine(BaseEngine):
 
         use_shm = config.model.get("use_shm", False)
         local_path = copy_to_local(config.model.path, use_shm=use_shm)
-        # note that the tokenizer between actor and critic may be different. So override tokenizer info with actor info
-        # using random initialized model from any architecture. May not be the same as Actor.
 
         tokenizer_path = copy_to_local(config.model.tokenizer_path, use_shm=use_shm)
         self.tokenizer = hf_tokenizer(tokenizer_path, trust_remote_code=config.model.get("trust_remote_code", False))
@@ -216,7 +176,7 @@ class FSDPEngine(BaseEngine):
             trust_remote_code=config.model.get("trust_remote_code", False),
         )
         model_config.num_labels = 1
-        # patch for kimi-vl
+
         if getattr(model_config, "model_type", None) == "kimi_vl":
             model_config.text_config.topk_method = "greedy"
 
@@ -243,7 +203,6 @@ class FSDPEngine(BaseEngine):
                 ulysses_sp_size=self.ulysses_sequence_parallel_size,
             )
 
-            # some parameters may not in torch_dtype
             module.to(torch_dtype)
 
             if config.model.get("enable_gradient_checkpointing", False):
@@ -252,7 +211,7 @@ class FSDPEngine(BaseEngine):
         if self._is_lora:
             print("Applying LoRA to the module")
             module.enable_input_require_grads()
-            # Convert config to regular Python types before creating PEFT model
+
             lora_config = {
                 "task_type": TaskType.CAUSAL_LM,
                 "r": self.config.model.lora_rank,
@@ -291,7 +250,6 @@ class FSDPEngine(BaseEngine):
         fsdp_mesh = self.device_mesh
         sharding_strategy = get_sharding_strategy(fsdp_mesh)
 
-        # Note: We force turn off CPUOffload because it causes incorrect results when using grad accumulation
         if config.strategy == "fsdp":
             module = FSDP(
                 module,
@@ -366,31 +324,15 @@ class FSDPEngine(BaseEngine):
         return module, optimizer, lr_scheduler
 
     def train_mode(self):
-        """
-        Return a context manager that switches to training mode with FSDP-specific handling.
-
-        Includes parameter and optimizer offload entry/exit.
-        """
         return EngineTrainModeCtx(self)
 
     def eval_mode(self):
-        """
-        Return a context manager that switches to evaluation mode with FSDP-specific handling.
-
-        Includes activation offload entry/exit.
-        """
         return EngineEvalModeCtx(self)
 
     def shard_data(self, data):
-        """
-        Preprocess data into sharded format via UlyssesShardingManager.
-        """
         return self.ulysses_sharding_manager.preprocess_data(data)
 
     def unshard_data(self, data):
-        """
-        Postprocess data from sharded format back to full format.
-        """
         return self.ulysses_sharding_manager.postprocess_data(data)
 
     def get_default_ctx(self):
@@ -414,54 +356,49 @@ class FSDPEngine(BaseEngine):
             batch, seqlen = input_ids.shape
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
-            if position_ids.dim() == 3:  # qwen2vl mrope
+            if position_ids.dim() == 3:
                 position_ids = position_ids.transpose(0, 1)
 
             if self.use_remove_padding:
                 input_ids_rmpad, indices, *_ = unpad_input(
                     input_ids.unsqueeze(-1), attention_mask
-                )  # input_ids_rmpad (total_nnz, ...)
-                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+                )
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)
 
-                # unpad the position_ids to align the rotary
                 if position_ids.dim() == 3:
                     position_ids_rmpad = (
                         index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices)
                         .transpose(0, 1)
                         .unsqueeze(1)
-                    )  # (3, bsz, seqlen) -> (3, 1, bsz * seqlen)
+                    )
                 else:
                     position_ids_rmpad = index_first_axis(
                         rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
                     ).transpose(0, 1)
 
-                # pad and slice the inputs if sp > 1
                 if self.ulysses_sequence_parallel_size > 1:
                     input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
                         input_ids_rmpad, position_ids_rmpad, sp_size=self.ulysses_sequence_parallel_size
                     )
 
-                # only pass input_ids and position_ids to enable flash_attn_varlen
                 preds = self.module(
                     input_ids=input_ids_rmpad,
                     attention_mask=None,
                     position_ids=position_ids_rmpad,
                     **multi_modal_inputs,
                     use_cache=False,
-                )  # prevent model thinks we are generating
+                )
 
                 if hasattr(self.module, "v_head"):
-                    # For trl.AutoModelForCausalLMWithValueHead
+
                     preds_rmpad = preds[2].squeeze(0).unsqueeze(-1)
                 else:
                     preds_rmpad = preds.logits
-                    preds_rmpad = preds_rmpad.squeeze(0)  # (total_nnz)
+                    preds_rmpad = preds_rmpad.squeeze(0)
 
-                # gather output if sp > 1
                 if self.ulysses_sequence_parallel_size > 1:
                     preds_rmpad = gather_outpus_and_unpad(preds_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size)
 
-                # pad it back
                 preds = pad_input(preds_rmpad, indices=indices, batch=batch, seqlen=seqlen).squeeze(-1)
             else:
                 preds = self.module(
@@ -470,9 +407,9 @@ class FSDPEngine(BaseEngine):
                     position_ids=position_ids,
                     **multi_modal_inputs,
                     use_cache=False,
-                )  # prevent model thinks we are generating
+                )
                 if hasattr(self.module, "v_head"):
-                    # For trl.AutoModelForCausalLMWithValueHead
+
                     preds = preds[2]
                 else:
                     preds = preds.logits
@@ -484,17 +421,6 @@ class FSDPEngine(BaseEngine):
         data: DataProto,
         post_fn: Callable[[DataProto, torch.Tensor], tuple[torch.Tensor, dict[str, torch.Tensor]]],
     ) -> dict[str, torch.Tensor]:
-        """
-        Perform inference on a mini batch of data.
-
-        Args:
-            data: The input data for inference, typically containing tensors and metadata.
-            post_fn: A post-processing function that takes a micro-batch and predictions as input,
-                     and returns a tuple containing processed predictions and a dictionary of outputs.
-
-        Returns:
-            dict[str, torch.Tensor]: A dictionary containing the predictions for the entire batch.
-        """
         assert self.mode == "eval"
         micro_batch_size = data.meta_info["micro_batch_size"]
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
@@ -507,7 +433,7 @@ class FSDPEngine(BaseEngine):
             non_tensor_select_keys = ["multi_modal_inputs"]
             micro_batches = data.select(select_keys, non_tensor_select_keys).chunk(num_micro_batches)
         elif use_dynamic_bsz:
-            # split using dynamic bsz
+
             max_token_len = data.meta_info["max_token_len"] * self.ulysses_sequence_parallel_size
             micro_batches, indices = rearrange_micro_batches(batch=batch, max_token_len=max_token_len)
         else:
@@ -519,16 +445,13 @@ class FSDPEngine(BaseEngine):
                 micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
 
             with torch.no_grad():
-                # micro_batch_preds would be a dict[str, torch.Tensor]
+
                 preds = self._forward_micro_batch(micro_batch)
                 _, outputs = post_fn(micro_batch, preds)
                 assert isinstance(outputs, dict)
 
-            # append micro batch preds to dict[str, List[torch.Tensor]]
             append_to_dict(preds_list, outputs)
 
-        # reorganize mini batch preds from
-        # dict[str, List[torch.Tensor]] to dict[str, torch.Tensor]
         mini_batch_preds = {}
         for key, t_list in preds_list.items():
             t_concat = torch.concat(t_list, dim=0)
@@ -548,18 +471,8 @@ class FSDPEngine(BaseEngine):
         data: DataProto,
         loss_fn: Callable[[DataProto, torch.Tensor], tuple[torch.Tensor, dict[str, torch.Tensor]]],
     ) -> dict[str, torch.Tensor]:
-        """
-        Perform a training step on a mini-batch of data.
-
-        Args:
-            data (DataProto): The input data for training, typically containing tensors and metadata.
-            loss_fn (Callable): A function that computes the loss and metrics given a micro-batch and predictions.
-
-        Returns:
-            dict[str, torch.Tensor]: A dictionary containing the aggregated training metrics for the mini-batch.
-        """
         assert self.mode == "train"
-        # split batch into micro_batches
+
         mini_batch = data
         select_keys = ["input_ids", "responses", "response_mask", "attention_mask", "position_ids"]
         if "multi_modal_inputs" in mini_batch:
@@ -576,11 +489,11 @@ class FSDPEngine(BaseEngine):
 
         mini_batch_metrics = {}
         for micro_batch in micro_batches:
-            # Support all devices
+
             if isinstance(micro_batch, DataProto):
                 micro_batch = {**micro_batch.batch.to(get_device_id()), **micro_batch.non_tensor_batch}
             else:
-                micro_batch = micro_batch.to(get_device_id())  # critic device is cpu when using offload
+                micro_batch = micro_batch.to(get_device_id())
 
             preds = self._forward_micro_batch(micro_batch)
             loss, micro_batch_metrics = loss_fn(micro_batch, preds)
@@ -590,18 +503,9 @@ class FSDPEngine(BaseEngine):
         return mini_batch_metrics
 
     def optimizer_zero_grad(self):
-        """
-        Zero gradients and enforce FSDP grad-clipping logic.
-        """
         self.optimizer.zero_grad()
 
     def optimizer_step(self):
-        """
-        Clip gradients, skip update if non-finite, and step optimizer.
-
-        Returns:
-            grad_norm (float): Norm of gradients before clipping.
-        """
         assert self.config.grad_clip is not None
 
         if isinstance(self.module, FSDP):
@@ -611,7 +515,6 @@ class FSDPEngine(BaseEngine):
         else:
             grad_norm = torch.nn.utils.clip_grad_norm_(self.module.parameters(), max_norm=self.config.grad_clip)
 
-        # if grad_norm is not finite, skip the update
         if not torch.isfinite(grad_norm):
             print(f"WARN: grad_norm is not finite: {grad_norm}")
             self.optimizer.zero_grad()
@@ -620,17 +523,11 @@ class FSDPEngine(BaseEngine):
         return grad_norm
 
     def lr_scheduler_step(self):
-        """
-        Advance FSDP scheduler and return updated learning rate.
-        """
         self.lr_scheduler.step()
         lr = self.lr_scheduler.get_last_lr()
         return lr
 
     def to(self, device: str, model: bool = True, optimizer: bool = True):
-        """
-        Move FSDP model and/or optimizer to CPU or GPU with offload support.
-        """
         assert device in ("cuda", "cpu")
         if device == "cuda":
             if not self.config.model.fsdp_config.param_offload:
@@ -649,9 +546,6 @@ class FSDPEngine(BaseEngine):
             raise ValueError(f"Invalid device type: {device}")
 
     def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
-        """
-        Save FSDP checkpoint, handling parameter offload as needed.
-        """
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.module)
 
@@ -664,9 +558,6 @@ class FSDPEngine(BaseEngine):
             offload_fsdp_model_to_cpu(self.module)
 
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=True):
-        """
-        Load FSDP checkpoint, restoring parameters and optimizer state.
-        """
         import torch
 
         if self._is_offload_param:
@@ -682,7 +573,6 @@ class FSDPEngine(BaseEngine):
 
         if self._is_offload_optimizer:
             offload_fsdp_optimizer(self.optimizer)
-
 
 class EngineEvalModeCtx:
     def __init__(self, engine):
@@ -701,7 +591,6 @@ class EngineEvalModeCtx:
         if self.engine._is_offload_param:
             offload_fsdp_model_to_cpu(self.engine.module)
         self.engine.mode = None
-
 
 class EngineTrainModeCtx:
     def __init__(self, engine):

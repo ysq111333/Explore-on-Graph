@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Server starts a Trainer. Client sends data to the server to train.
-"""
+
 
 import os
 
@@ -39,7 +24,6 @@ from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool
 from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
 from verl.utils.megatron.optimizer import get_megatron_optimizer
 from verl.utils.megatron_utils import get_model, init_megatron_optim_config, mcore_model_parallel_config
-
 
 @ray.remote
 class Trainer(MegatronWorker):
@@ -79,9 +63,7 @@ class Trainer(MegatronWorker):
         self.megatron_config = megatron_config
 
         def megatron_actor_model_provider(pre_process, post_process):
-            # vpp is not supported yet because it will hang for some reason. Need debugging
-            # this_megatron_config = copy.deepcopy(megatron_config)
-            # this_megatron_config.virtual_pipeline_model_parallel_rank = vpp_rank
+
             parallel_model = ParallelLlamaForCausalLMRmPadPP(
                 config=actor_model_config,
                 megatron_config=megatron_config,
@@ -116,8 +98,8 @@ class Trainer(MegatronWorker):
         self.optimizer.zero_grad()
         self.model.zero_grad_buffer(
             zero_buffer=(not self.optimizer_config.use_distributed_optimizer)
-        )  # use use_contiguous_buffers_in_local_ddp and no overlap_dp_param_comm
-        # update for 1 iteration
+        )
+
         output = self.model(input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids).logits
         output.mean().backward()
 
@@ -126,7 +108,6 @@ class Trainer(MegatronWorker):
         )
 
         return DataProto(batch=TensorDict({"loss": output.detach()}, batch_size=output.shape[0]))
-
 
 if __name__ == "__main__":
     ray.init(address="auto", namespace="verl")

@@ -1,18 +1,5 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-# noqa
+
 import asyncio
 import time
 from copy import deepcopy
@@ -42,7 +29,6 @@ from verl.workers.rollout.schemas import AsyncRolloutRequest, AsyncRolloutReques
 from verl.workers.rollout.sglang_rollout.sglang_rollout import SGLangRollout
 
 sandbox_url = ""
-
 
 def get_sandbox_fusion_messages():
     user_prompt = {
@@ -133,7 +119,6 @@ def get_sandbox_fusion_messages():
 
     return user_prompts, expect_turn_array, tool_return_array
 
-
 def skip_if_valid_sandbox(url):
     def decorator(func):
         @wraps(func)
@@ -145,7 +130,6 @@ def skip_if_valid_sandbox(url):
 
     return decorator
 
-
 class TestRolloutWithTools:
     @pytest.fixture
     def qwen_tokenizer(self):
@@ -154,7 +138,6 @@ class TestRolloutWithTools:
         tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
-    # we only need this for tokenizer
     @pytest.fixture
     def qwen_model_config(self):
         local_model_path = "Qwen/Qwen2.5-0.5B"
@@ -222,7 +205,6 @@ class TestRolloutWithTools:
 
     @pytest.fixture
     def mock_rollout(self, sandbox_fusion_rollout_config, qwen_tokenizer, qwen_model_config):
-        """Mock the rollout instance"""
         with patch.object(SGLangRollout, "_init_distributed_env", return_value=None), patch.object(
             SGLangRollout, "_init_inference_engine", return_value=None
         ), patch.object(SGLangRollout, "_init_sampling_params", return_value=None):
@@ -232,7 +214,7 @@ class TestRolloutWithTools:
                 processing_class=qwen_tokenizer,
                 model_hf_config=qwen_model_config,
             )
-            # set default sampling_params
+
             rollout.sampling_params = {
                 "n": 1,
                 "max_new_tokens": sandbox_fusion_rollout_config.response_length,
@@ -243,7 +225,6 @@ class TestRolloutWithTools:
             return rollout
 
     def test_tools_registration(self, mock_rollout):
-        """Test tool registration functionality"""
         assert len(mock_rollout._tool_schemas) == 1
         assert "code_interpreter" in mock_rollout._tool_map.keys()
         from verl.tools.sandbox_fusion_tools import SandboxFusionTool
@@ -252,7 +233,6 @@ class TestRolloutWithTools:
         assert mock_rollout._tool_call_parser_type == "qwen25"
 
     def test_rollout_req_creation(self, mock_rollout, sandbox_data_proto):
-        """Test request creation functionality"""
         req_list = mock_rollout._preprocess_prompt_to_async_rollout_requests(sandbox_data_proto, n=1)
         assert len(req_list) == 1
         assert req_list[0].state == AsyncRolloutRequestStateEnum.PENDING
@@ -279,7 +259,6 @@ class TestRolloutWithTools:
         )
 
     def test_over_size_case(self, mock_rollout, sandbox_data_proto, sandbox_fusion_data):
-        """Test over-size response truncation case"""
         mock_rollout.config.multi_turn.max_assistant_turns = 1
         req = mock_rollout._preprocess_prompt_to_async_rollout_requests(sandbox_data_proto, n=1)[0]
         req = MagicMock(wraps=req, spec=AsyncRolloutRequest)
@@ -287,7 +266,7 @@ class TestRolloutWithTools:
         req_list = [req]
 
         _, expect_turn_array, tool_return_array = sandbox_fusion_data
-        # here we mock a meta info with 'length'. indicate the response is truncate
+
         mock_rollout._handle_engine_call = MagicMock()
         future = asyncio.Future()
         future.set_result(
@@ -315,7 +294,7 @@ class TestRolloutWithTools:
         output_req = output_req_list[0]
         assert output_req.state == AsyncRolloutRequestStateEnum.COMPLETED
         assert output_req.reward_scores.get("code_interpreter") == []
-        # we should only have two message, one for prompt, second for response.
+
         assert len(output_req.messages) == 2
         assert output_req.messages[1] == Message(
             role="assistant",
@@ -325,7 +304,6 @@ class TestRolloutWithTools:
 
     @skip_if_valid_sandbox(sandbox_url)
     def test_tool_call_basic_case(self, mock_rollout, sandbox_data_proto, sandbox_fusion_data):
-        """Test basic tool call case"""
         mock_rollout.config.multi_turn.max_assistant_turns = 10
         mock_rollout._tool_map["code_interpreter"].sandbox_fusion_url = sandbox_url
         req = mock_rollout._preprocess_prompt_to_async_rollout_requests(sandbox_data_proto, n=1)[0]
@@ -333,7 +311,7 @@ class TestRolloutWithTools:
         req.finalize = MagicMock()
         req_list = [req]
         _, expect_turn_array, tool_return_array = sandbox_fusion_data
-        # here we mock a meta info with 'length'. indicate the response is truncate
+
         mock_rollout._handle_engine_call = MagicMock()
         futures = [asyncio.Future() for i in expect_turn_array]
         for idx, (i, turn) in enumerate(zip(futures, expect_turn_array)):
@@ -365,10 +343,10 @@ class TestRolloutWithTools:
         assert len(output_req_list) == 1
         output_req = output_req_list[0]
         assert output_req.state == AsyncRolloutRequestStateEnum.COMPLETED
-        # here we verify whether the code sandbox is executed correctly
+
         assert output_req.metrics == {"code_interpreter": ["3", "149"]}
         assert mock_rollout._handle_engine_call.call_count == 3
-        assert len(output_req.messages) == 6  # user + 3*assistant + 2*tool_call
+        assert len(output_req.messages) == 6
         code_counter = 0
         for msg in output_req.messages:
             if msg.role == "tool":
@@ -378,14 +356,13 @@ class TestRolloutWithTools:
 
     @skip_if_valid_sandbox(sandbox_url)
     def test_tool_call_batch_case(self, mock_rollout, sandbox_data_proto, sandbox_fusion_data):
-        """Test batch tool call case"""
         mock_rollout.config.multi_turn.max_assistant_turns = 10
         mock_rollout._tool_map["code_interpreter"].sandbox_fusion_url = sandbox_url
         req = mock_rollout._preprocess_prompt_to_async_rollout_requests(sandbox_data_proto, n=1)[0]
         req_nums = 100
         req_list = []
         req_turns_counter = {}
-        # this map should a Map[id:List[Futures]]
+
         req_turns_map = {}
         _, expect_turn_array, tool_return_array = sandbox_fusion_data
         for i in range(req_nums):
@@ -431,13 +408,12 @@ class TestRolloutWithTools:
                 )
             )
             assert len(output_req_list) == req_nums
-            # FIGUER out how to count this
-            # assert rollout._handle_engine_call.call_count == 3 * req_nums
+
             for output_req in output_req_list:
                 assert output_req.state == AsyncRolloutRequestStateEnum.COMPLETED
-                # here we verify whether the code sandbox is executed correctly
+
                 assert output_req.metrics == {"code_interpreter": ["3", "149"]}
-                assert len(output_req.messages) == 6  # user + 3*assistant + 2*tool_call
+                assert len(output_req.messages) == 6
                 code_counter = 0
                 for msg in output_req.messages:
                     if msg.role == "tool":
@@ -445,21 +421,17 @@ class TestRolloutWithTools:
                 assert code_counter == 2
 
     def test_sampling_params_functionality(self, mock_rollout):
-        """Test sampling_params functionality"""
-        # test basic copy functionality
+
         copied_params = mock_rollout.sampling_params.copy()
         assert copied_params == mock_rollout.sampling_params
         assert copied_params is not mock_rollout.sampling_params
 
-        # test parameter update
         copied_params.update({"temperature": 0.8, "top_p": 0.9})
         assert copied_params["temperature"] == 0.8
         assert copied_params["top_p"] == 0.9
 
-        # ensure original parameters are not modified
         assert "temperature" not in mock_rollout.sampling_params
         assert "top_p" not in mock_rollout.sampling_params
-
 
 class RayMultiProcessTestCase(MultiProcessTestCase):
     def setUp(self):
@@ -471,7 +443,6 @@ class RayMultiProcessTestCase(MultiProcessTestCase):
     def tearDown(self):
         print("tearDown_single cluster")
         ray.shutdown()
-
 
 @ray.remote
 class TestActor:
@@ -498,7 +469,7 @@ class TestActor:
 
         now = time.time()
         while time.time() - now < timeout:
-            # for start and end time
+
             if len(self.time_list) == self._world_size * 2:
                 self.time_list.sort()
                 return self.time_list[-1] - self.time_list[0]
@@ -524,11 +495,10 @@ class TestActor:
                 continue
         return False
 
-
 class TestRayGlobalActorCase(RayMultiProcessTestCase):
     @property
     def world_size(self) -> int:
-        # for DP = 8
+
         return 2
 
     def test_basic_multi_process_init(self):
@@ -536,20 +506,6 @@ class TestRayGlobalActorCase(RayMultiProcessTestCase):
         handle = TestActor.remote(self.rank, self.world_size)
         re = ray.get(handle.get_rank.remote())
         assert re == self.rank, f"rank not match: {re} != {self.rank}"
-
-    # def test_global_actor(self):
-    #     ray.init("auto",namespace="test",ignore_reinit_error=True)
-    #     handle = TestActor.options(get_if_exists=True,name="test-actor").remote(self.rank,self.world_size)
-    #     handle.record_rank.remote(self.rank)
-    #     # since test actor's concurrency is 1, we need to wait for all processes to finish
-    #     time.sleep(5)
-    #     assert ray.get(handle.ping.remote()) == True # make sure actor handle is valid
-    #     if self.rank == 0:
-    #         assert ray.get(handle.verify_rank.remote()) == True
-    #     else:
-    #         # get_actor use weak_ref, so we need to make sure the actor is not garbage collected
-    #         time.sleep(10)
-
 
 class TestSingleNodeRateLimiterCase(RayMultiProcessTestCase):
     @property
@@ -560,7 +516,6 @@ class TestSingleNodeRateLimiterCase(RayMultiProcessTestCase):
         ray.init("auto", namespace="test", ignore_reinit_error=True)
         from verl.tools.sandbox_fusion_tools import PoolMode, init_execution_pool
 
-        # exec_worker = ExecutionWorker.options(max_concurrency=10).remote(enable_global_rate_limit=True, rate_limit=3)
         exec_worker = init_execution_pool(
             num_workers=10, enable_global_rate_limit=True, rate_limit=3, mode=PoolMode.ThreadMode
         )
@@ -584,7 +539,7 @@ class TestSingleNodeRateLimiterCase(RayMultiProcessTestCase):
         print(f"Total time: {duration:.2f} seconds for rank: {self.rank}")
 
         assert results == list(range(6))
-        # we have 6 task with rate limit of 3, therefore we need at least 2 round: 3*2=6 seconds
+
         assert duration > 6
         assert duration < 10
 
@@ -592,7 +547,6 @@ class TestSingleNodeRateLimiterCase(RayMultiProcessTestCase):
         ray.init("auto", namespace="test", ignore_reinit_error=True)
         from verl.tools.sandbox_fusion_tools import PoolMode, init_execution_pool
 
-        # exec_worker = ExecutionWorker.options(max_concurrency=10).remote(enable_global_rate_limit=True, rate_limit=6)
         exec_worker = init_execution_pool(
             num_workers=10, enable_global_rate_limit=True, rate_limit=6, mode=PoolMode.ThreadMode
         )
@@ -614,7 +568,6 @@ class TestSingleNodeRateLimiterCase(RayMultiProcessTestCase):
         rate = ray.get(rate_limiter.get_current_count.remote())
         assert rate == 0, f"rate: {rate}"
 
-
 class TestMultiNodeRateLimiterCase(RayMultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -624,7 +577,6 @@ class TestMultiNodeRateLimiterCase(RayMultiProcessTestCase):
         ray.init("auto", namespace="test", ignore_reinit_error=True)
         from verl.tools.sandbox_fusion_tools import PoolMode, init_execution_pool
 
-        # exec_worker = ExecutionWorker.options(max_concurrency=10).remote(enable_global_rate_limit=True, rate_limit=6)
         exec_worker = init_execution_pool(
             num_workers=10, enable_global_rate_limit=True, rate_limit=6, mode=PoolMode.ThreadMode
         )
@@ -651,9 +603,7 @@ class TestMultiNodeRateLimiterCase(RayMultiProcessTestCase):
         if self.rank == 0:
             total_cost = ray.get(center.get_time.remote(10))
             print(f"for total cost: {total_cost}")
-            # # we have 6 task each node * 2node = 12 task, each task take 2 second.
-            # with rate limit of 6,
-            # therefore we need at least 2 round: 12/6*2=4 seconds
+
             assert total_cost > 4, total_cost
         else:
             time.sleep(10)

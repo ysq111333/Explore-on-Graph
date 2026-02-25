@@ -1,24 +1,8 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2023-2024 SGLang Team
-# Copyright 2025 Search-R1 Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# Adapted from https://github.com/PeterGriffinJin/Search-R1/blob/main/verl/utils/reward_score/qa_em.py
+
 
 import random
 import re
 import string
-
 
 def normalize_answer(s):
     def remove_articles(text):
@@ -36,7 +20,6 @@ def normalize_answer(s):
 
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
-
 def em_check(prediction, golden_answers):
     if isinstance(golden_answers, str):
         golden_answers = [golden_answers]
@@ -48,7 +31,6 @@ def em_check(prediction, golden_answers):
             score = 1
             break
     return score
-
 
 def subem_check(prediction, golden_answers):
     if isinstance(golden_answers, str):
@@ -62,29 +44,16 @@ def subem_check(prediction, golden_answers):
             break
     return score
 
-
 def extract_solution(solution_str):
-    """Extract the equation from the solution string."""
-    # Remove everything before the first "Assistant:"
-    # if "Assistant:" in solution_str:
-    #     solution_str = solution_str.split("Assistant:", 1)[1]
-    # elif "<|im_start|>assistant" in solution_str:
-    #     solution_str = solution_str.split("<|im_start|>assistant", 1)[1]
-    # else:
-    #     return None
-    # solution_str = solution_str.split('\n')[-1]
 
     answer_pattern = r"<answer>(.*?)</answer>"
     match = re.finditer(answer_pattern, solution_str, re.DOTALL)
     matches = list(match)
 
-    # If there are 0  matches, return None
     if len(matches) < 1:
         return None
 
-    # If there are 2 or more matches, return the last one
     return matches[-1].group(1).strip()
-
 
 def count_answer_tags(text):
     opening_tags = text.count("<answer>")
@@ -92,17 +61,7 @@ def count_answer_tags(text):
 
     return opening_tags, closing_tags
 
-
 def compute_score(solution_str, ground_truth, method="strict", format_score=0.0, score=1.0):
-    """The scoring function for exact match (EM).
-
-    Args:
-        solution_str: the solution text
-        ground_truth: the ground truth
-        method: the method to extract the solution, choices are 'strict' and 'flexible'
-        format_score: the score for the format
-        score: the score for the correct answer
-    """
     answer = extract_solution(solution_str=solution_str)
     open_count, close_count = count_answer_tags(solution_str)
     do_print = random.randint(1, 64) == 1
@@ -120,24 +79,14 @@ def compute_score(solution_str, ground_truth, method="strict", format_score=0.0,
         return 0
     else:
         if em_check(answer, ground_truth["target"]):
-            if open_count > 10 or close_count > 10:  # prevent output a lot of </answer>
+            if open_count > 10 or close_count > 10:
                 score = score / 4
                 return score
             return score
         else:
             return format_score
 
-
 def compute_score_subem(solution_str, ground_truth, method="strict", format_score=0.0, score=1.0):
-    """The scoring function for substring exact match (EM).
-
-    Args:
-        solution_str: the solution text
-        ground_truth: the ground truth
-        method: the method to extract the solution, choices are 'strict' and 'flexible'
-        format_score: the score for the format
-        score: the score for the correct answer
-    """
     answer = extract_solution(solution_str=solution_str)
     do_print = random.randint(1, 64) == 1
 

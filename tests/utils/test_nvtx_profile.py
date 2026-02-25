@@ -1,17 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import unittest
 from unittest.mock import MagicMock, patch
@@ -19,7 +6,6 @@ from unittest.mock import MagicMock, patch
 from verl.utils import omega_conf_to_dataclass
 from verl.utils.profiler import ProfilerConfig
 from verl.utils.profiler.nvtx_profile import NsightSystemsProfiler
-
 
 class TestProfilerConfig(unittest.TestCase):
     def test_config_init(self):
@@ -51,15 +37,12 @@ class TestProfilerConfig(unittest.TestCase):
                 profiler_config.discrete = False
 
     def test_frozen_config(self):
-        """Test that modifying frozen keys in ProfilerConfig raises exceptions."""
         from dataclasses import FrozenInstanceError
 
         from verl.utils.profiler.config import ProfilerConfig
 
-        # Create a new ProfilerConfig instance
         config = ProfilerConfig(discrete=True, all_ranks=False, ranks=[0])
 
-        # Test direct attribute assignment
         with self.assertRaises(FrozenInstanceError):
             config.discrete = False
 
@@ -69,7 +52,6 @@ class TestProfilerConfig(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             config.ranks = [1, 2, 3]
 
-        # Test dictionary-style assignment
         with self.assertRaises(TypeError):
             config["discrete"] = False
 
@@ -81,17 +63,7 @@ class TestProfilerConfig(unittest.TestCase):
 
         config["extra"]["key"] = "value"
 
-
 class TestNsightSystemsProfiler(unittest.TestCase):
-    """Test suite for NsightSystemsProfiler functionality.
-
-    Test Plan:
-    1. Initialization: Verify profiler state after creation
-    2. Basic Profiling: Test start/stop functionality
-    3. Discrete Mode: Test discrete profiling behavior
-    4. Annotation: Test the annotate decorator in both normal and discrete modes
-    5. Config Validation: Verify proper config initialization from OmegaConf
-    """
 
     def setUp(self):
         self.config = ProfilerConfig(all_ranks=True)
@@ -105,12 +77,11 @@ class TestNsightSystemsProfiler(unittest.TestCase):
 
     def test_start_stop_profiling(self):
         with patch("torch.cuda.profiler.start") as mock_start, patch("torch.cuda.profiler.stop") as mock_stop:
-            # Test start
+
             self.profiler.start()
             self.assertTrue(self.profiler.this_step)
             mock_start.assert_called_once()
 
-            # Test stop
             self.profiler.stop()
             self.assertFalse(self.profiler.this_step)
             mock_stop.assert_called_once()
@@ -122,11 +93,11 @@ class TestNsightSystemsProfiler(unittest.TestCase):
         with patch("torch.cuda.profiler.start") as mock_start, patch("torch.cuda.profiler.stop") as mock_stop:
             profiler.start()
             self.assertTrue(profiler.this_step)
-            mock_start.assert_not_called()  # Shouldn't start immediately in discrete mode
+            mock_start.assert_not_called()
 
             profiler.stop()
             self.assertFalse(profiler.this_step)
-            mock_stop.assert_not_called()  # Shouldn't stop immediately in discrete mode
+            mock_stop.assert_not_called()
 
     def test_annotate_decorator(self):
         mock_self = MagicMock()
@@ -147,8 +118,8 @@ class TestNsightSystemsProfiler(unittest.TestCase):
             self.assertEqual(result, "result")
             mock_start_range.assert_called_once()
             mock_end_range.assert_called_once()
-            mock_start.assert_not_called()  # Not discrete mode
-            mock_stop.assert_not_called()  # Not discrete mode
+            mock_start.assert_not_called()
+            mock_stop.assert_not_called()
 
     def test_annotate_discrete_mode(self):
         discrete_config = ProfilerConfig(discrete=True, all_ranks=True)
@@ -171,9 +142,8 @@ class TestNsightSystemsProfiler(unittest.TestCase):
             self.assertEqual(result, "result")
             mock_start_range.assert_called_once()
             mock_end_range.assert_called_once()
-            mock_start.assert_called_once()  # Should start in discrete mode
-            mock_stop.assert_called_once()  # Should stop in discrete mode
-
+            mock_start.assert_called_once()
+            mock_stop.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

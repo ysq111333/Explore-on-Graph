@@ -1,23 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-"""
-verify_imported_docs.py
-
-Assert that every function or class *explicitly imported* (via
-`from <module> import <name>`) in a given Python file has a docstring.
-"""
 
 from __future__ import annotations
 
@@ -27,7 +8,6 @@ import importlib
 import inspect
 import pathlib
 import sys
-
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Verify that imported functions/classes have docstrings.")
@@ -53,16 +33,12 @@ def _parse_args() -> argparse.Namespace:
     )
     return p.parse_args()
 
-
 def _import_attr(module_name: str, attr_name: str):
-    """Import `module_name` then return `getattr(module, attr_name)`."""
     module = importlib.import_module(module_name)
     return getattr(module, attr_name)
 
-
 def _check_file(py_file: pathlib.Path, project_root: pathlib.Path, allow_list: list[str]) -> list[str]:
-    """Return a list of error strings (empty == success)."""
-    # Ensure local packages resolve
+
     sys.path.insert(0, str(project_root.resolve()))
 
     tree = ast.parse(py_file.read_text(), filename=str(py_file))
@@ -72,7 +48,6 @@ def _check_file(py_file: pathlib.Path, project_root: pathlib.Path, allow_list: l
         if not isinstance(node, ast.ImportFrom):
             continue
 
-        # Relative imports (level > 0) get the leading dots stripped
         module_name = "." * node.level + (node.module or "")
         for alias in node.names:
             if alias.name == "*":
@@ -85,13 +60,9 @@ def _check_file(py_file: pathlib.Path, project_root: pathlib.Path, allow_list: l
 
             try:
                 obj = _import_attr(module_name, imported_name)
-            except Exception:  # pragma: no cover – wide net for import quirks
+            except Exception:
                 pass
-                # For some reason the module cannot be imported, skip for now
-                # problems.append(
-                #     f"{py_file}:{node.lineno} - could not resolve "
-                #     f"`{imported_name}` from `{module_name}` ({exc})"
-                # )
+
                 continue
 
             if f"{module_name}.{imported_name}" in allow_list:
@@ -105,7 +76,6 @@ def _check_file(py_file: pathlib.Path, project_root: pathlib.Path, allow_list: l
                     )
 
     return problems
-
 
 def main() -> None:
     args = _parse_args()
@@ -124,7 +94,6 @@ def main() -> None:
 
     if not args.quiet:
         print(f"✅ All explicitly imported functions/classes in {target_path} have docstrings.")
-
 
 if __name__ == "__main__":
     main()

@@ -1,20 +1,5 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-# use mcore transformer config to initialize the model
+
 from abc import ABC, abstractmethod
 
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_decoder_block_spec, get_gpt_mtp_block_spec
@@ -22,9 +7,7 @@ from megatron.core.models.gpt.gpt_model import GPTModel
 
 from .config_converter import PretrainedConfig, TransformerConfig
 
-
 class BaseModelInitializer(ABC):
-    """Base class for model initializers."""
 
     def __init__(self, tfconfig: TransformerConfig, hf_config: PretrainedConfig):
         self.tfconfig = tfconfig
@@ -32,16 +15,13 @@ class BaseModelInitializer(ABC):
 
     @abstractmethod
     def get_transformer_layer_spec(self):
-        """Get the transformer layer specification.
-        https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_layer_specs.py"""
         pass
 
     def get_rope_scaling_args(self) -> dict:
-        """Get rope scaling args."""
         rope_scaling_args = {}
         if "rope_scaling" in self.hf_config:
             if self.hf_config.rope_scaling is not None:
-                # assert self.hf_config.rope_scaling["type"] == "linear", "only linear scaling is supported for now"
+
                 rope_scaling_args["seq_len_interpolation_factor"] = self.hf_config.rope_scaling["factor"]
         return rope_scaling_args
 
@@ -53,18 +33,6 @@ class BaseModelInitializer(ABC):
         value: bool = False,
         **extra_kwargs,
     ) -> GPTModel:
-        """Initialize a GPT model with the given configuration.
-        https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_model.py
-
-        Args:
-            pre_process (bool): include embedding layer.
-            post_process (bool): including an output layer.
-            share_embeddings_and_output_weights (bool): input embeddings and output logit weights are shared.
-            value (bool): add an extra linear layer for classification or regression.
-
-        Returns:
-            GPTModel: An initialized GPT model instance
-        """
         transformer_layer_spec = self.get_transformer_layer_spec()
         rope_scaling_args = self.get_rope_scaling_args()
         mtp_block_spec = extra_kwargs.get("mtp_block_spec", None)
@@ -91,30 +59,25 @@ class BaseModelInitializer(ABC):
 
         return model
 
-
 class DenseModel(BaseModelInitializer):
-    """Initializer for dense models like Llama and Qwen2."""
 
     def get_transformer_layer_spec(self):
         assert self.tfconfig.normalization == "RMSNorm", "only RMSNorm is supported for now"
         return get_gpt_decoder_block_spec(self.tfconfig, use_transformer_engine=True)
 
-
 class Qwen2MoEModel(BaseModelInitializer):
-    """Initializer for Qwen2 MoE models."""
 
     def get_transformer_layer_spec(self):
         assert self.tfconfig.normalization == "RMSNorm", "only RMSNorm is supported for now"
         transformer_layer_spec = get_gpt_decoder_block_spec(self.tfconfig, use_transformer_engine=True)
 
-        # Patch layer spec for shared experts
         for i in range(len(transformer_layer_spec.layer_specs)):
             transformer_layer_spec.layer_specs[i].submodules.mlp.submodules.shared_experts.params["gate"] = True
 
         return transformer_layer_spec
 
     def initialize(self, **kwargs):
-        # Qwen default freeze_moe_router: true
+
         model = super().initialize(**kwargs)
         freeze_moe_router = kwargs.get("freeze_moe_router", True)
         if freeze_moe_router:
@@ -122,9 +85,7 @@ class Qwen2MoEModel(BaseModelInitializer):
                 layer.mlp.router.weight.requires_grad = False
         return model
 
-
 class MixtralModel(BaseModelInitializer):
-    """Initializer for Mixtral models."""
 
     def get_transformer_layer_spec(self):
         assert self.tfconfig.normalization == "RMSNorm", "only RMSNorm is supported for now"
@@ -139,9 +100,7 @@ class MixtralModel(BaseModelInitializer):
                 layer.mlp.router.weight.requires_grad = False
         return model
 
-
 class Qwen3MoEModel(BaseModelInitializer):
-    """Initializer for Qwen3 MoE models."""
 
     def get_transformer_layer_spec(self):
         assert self.tfconfig.normalization == "RMSNorm", "only RMSNorm is supported for now"
@@ -149,7 +108,7 @@ class Qwen3MoEModel(BaseModelInitializer):
         return transformer_layer_spec
 
     def initialize(self, **kwargs):
-        # Qwen default freeze_moe_router: true
+
         model = super().initialize(**kwargs)
         freeze_moe_router = kwargs.get("freeze_moe_router", True)
         if freeze_moe_router:
@@ -157,16 +116,13 @@ class Qwen3MoEModel(BaseModelInitializer):
                 layer.mlp.router.weight.requires_grad = False
         return model
 
-
 class DeepseekV3Model(BaseModelInitializer):
-    """Initializer for DeepseekV3 models."""
 
     def get_transformer_layer_spec(self):
         transformer_layer_spec = get_gpt_decoder_block_spec(self.tfconfig, use_transformer_engine=True)
         return transformer_layer_spec
 
     def get_rope_scaling_args(self) -> dict:
-        """Get rope scaling args."""
         rope_scaling_args = {}
         return rope_scaling_args
 
@@ -177,7 +133,7 @@ class DeepseekV3Model(BaseModelInitializer):
         freeze_moe_router = kwargs.get("freeze_moe_router", True)
         if freeze_moe_router:
             self.tfconfig.moe_router_load_balancing_type = "none"
-        # MTP
+
         if self.tfconfig.mtp_num_layers is not None:
             transformer_layer_spec = self.get_transformer_layer_spec()
             mtp_block_spec = get_gpt_mtp_block_spec(self.tfconfig, transformer_layer_spec, use_transformer_engine=True)
@@ -190,9 +146,7 @@ class DeepseekV3Model(BaseModelInitializer):
                     layer.mlp.router.weight.requires_grad = False
         return model
 
-
 class Qwen25VLModel(BaseModelInitializer):
-    """Initializer for Qwen2.5 VL models."""
 
     def get_transformer_layer_spec(self):
         transformer_layer_spec = get_gpt_decoder_block_spec(self.tfconfig, use_transformer_engine=True)
@@ -208,7 +162,7 @@ class Qwen25VLModel(BaseModelInitializer):
     ):
         tfconfig = self.tfconfig
         hf_config = self.hf_config
-        # Qwen2_5_VLForConditionalGeneration
+
         from copy import deepcopy
 
         transformer_layer_spec = self.get_transformer_layer_spec()

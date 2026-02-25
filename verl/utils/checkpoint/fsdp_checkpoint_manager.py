@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import json
 import logging
@@ -34,42 +22,16 @@ from verl.utils.logger import log_with_rank
 
 from .checkpoint_manager import BaseCheckpointManager
 
-# Setup logging
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
 
-
 @dataclass
 class FSDPConfig:
-    """Configuration for FSDP checkpointing.
-
-    Args:
-        FSDP_version (int): Version of FSDP being used.
-        world_size (int): Number of processes in the distributed training setup.
-    """
 
     FSDP_version: int
     world_size: int
 
-
 class FSDPCheckpointManager(BaseCheckpointManager):
-    """
-    Manage FSDP checkpointing in SPMD training.
-
-    - Saves/loads per-rank sharded model & optimizer states
-    - Persists full lr_scheduler and RNG state
-    - Stores HF tokenizer/processor and model/config for unified restore
-
-    Args:
-        model (FSDP): Wrapped model instance.
-        optimizer (Optimizer): Training optimizer.
-        lr_scheduler (LRScheduler): Learning-rate scheduler.
-        processing_class (PreTrainedTokenizer or ProcessorMixin, optional):
-            Pre-/post-processing artifact handler.
-        checkpoint_contents DictConfig: Configuration for checkpoint contents.
-            - 'load': Components to load; must contain 'model'. Defaults to ['model', 'optimizer', 'extra'].
-            - 'save': Components to save; must contain 'model'. Defaults to ['model', 'optimizer', 'extra'].
-    """
 
     def __init__(
         self,
@@ -96,22 +58,9 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         )
 
     def load_checkpoint(self, local_path: str, hdfs_path: str = None, del_local_after_load=False):
-        """
-        Load an FSDP checkpoint for this rank.
-
-        Downloads and loads:
-          - model and optimizer shards
-          - extra state dict (scheduler + RNG)
-
-        Args:
-            local_path: Directory with per-rank checkpoint files.
-            hdfs_path: Unused (for API compatibility).
-            del_local_after_load: Remove local files after loading.
-        """
         if local_path is None:
             return
 
-        # check if the checkpoint_load_contents is valid
         if self.should_load_model:
             assert self.model is not None, "model must be provided when checkpoint_contents.load includes ['model']"
         if self.should_load_optimizer:
@@ -119,7 +68,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 "optimizer must be provided when checkpoint_contents.load includes ['optimizer']"
             )
 
-        # every rank download its own checkpoint
         state_dict_cfg = (
             ShardedStateDictConfig(offload_to_cpu=True if is_cuda_available else False)
             if self.should_load_model
@@ -151,9 +99,9 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             )
             local_extra_state_path = copy_to_local(remote_extra_state_path)
             extra_state_dict = torch.load(local_extra_state_path, weights_only=False)
-            # recover random state
+
             if "rng" in extra_state_dict:
-                # 'rng' may not exist for backward compatibility
+
                 self.load_rng_state(extra_state_dict["rng"])
                 log_with_rank(f"Loaded rng from {remote_extra_state_path}", rank=self.rank, logger=logger)
 
@@ -174,34 +122,14 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                     logger=logger,
                 )
 
-        # wait for everyone to load checkpoints
         torch.distributed.barrier()
 
     def save_checkpoint(self, local_path: str, hdfs_path: str = None, global_step: int = 0, max_ckpt_to_keep=None):
-        """
-        Save an FSDP checkpoint for this rank.
-
-        Writes:
-          - model & optimizer shard files
-          - extra state dict (scheduler + RNG)
-          - HF tokenizer/processor and model/config on rank 0
-          - optional full HF model under 'huggingface/' if requested
-
-        Rotates old checkpoints, keeping at most `max_ckpt_to_keep`.
-
-        Args:
-            local_path: Target directory for checkpoint files.
-            hdfs_path: Unused (for API compatibility).
-            global_step: Current training step (used for bookkeeping).
-            max_ckpt_to_keep: Number of recent checkpoints to retain.
-        """
         if local_path is None:
             return
 
-        # record the previous global step
         self.previous_global_step = global_step
 
-        # remove previous local_path, only rank 0 should do this
         if (
             self.rank == 0
             and max_ckpt_to_keep
@@ -216,7 +144,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         local_path = local_mkdir_safe(local_path)
         torch.distributed.barrier()
 
-        # check if the checkpoint_save_contents is valid
         if self.should_save_model:
             assert self.model is not None, "model must be provided when checkpoint_contents.save includes ['model']"
         if self.should_save_optimizer:
@@ -224,7 +151,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 "optimizer must be provided when checkpoint_contents.save includes ['optimizer']"
             )
 
-        # every rank will save its own model and optim shard
         state_dict_cfg = ShardedStateDictConfig(offload_to_cpu=True if is_cuda_available else False)
         optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True if is_cuda_available else False)
         with warnings.catch_warnings():
@@ -254,8 +180,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                     log_with_rank(f"Saved extra_state to {os.path.abspath(extra_path)}", rank=self.rank, logger=logger)
 
         if self.rank == 0:
-            # Save HF tokenizer/processor and model config on rank 0 to huggingface/ directory, no matter whether
-            # huggingface model is requested to be saved or not.
 
             if fsdp_version(self.model) == 1:
                 unwrap_model = self.model._fsdp_wrapped_module
@@ -266,8 +190,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             local_mkdir_safe(hf_config_tokenizer_path)
             model_config = unwrap_model.config
             if unwrap_model.can_generate() and hasattr(model_config, "name_or_path") and model_config.name_or_path:
-                # Some model's name_or_path is empty if not initialized from pretrained,
-                # in this cases, we don't save generation config.
+
                 generation_config = GenerationConfig.from_pretrained(model_config.name_or_path)
                 generation_config.save_pretrained(hf_config_tokenizer_path)
             else:
@@ -282,7 +205,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 log_only_rank_0=True,
             )
 
-            # Also save runtime FSDP config
             fsdp_config_path = os.path.join(local_path, "fsdp_config.json")
             fsdp_config = FSDPConfig(
                 FSDP_version=fsdp_version(self.model),
@@ -291,12 +213,10 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             with open(fsdp_config_path, "w") as f:
                 json.dump(asdict(fsdp_config), f, indent=4)
 
-        # wait for everyone to dump to local
         torch.distributed.barrier()
 
         if self.should_save_hf_model:
-            # Only rank 0 will save hf model and,
-            # offload to cpu to save LLMs which may be too large to fit in one GPU
+
             state_dict = get_fsdp_full_state_dict(self.model, offload_to_cpu=True, rank0_only=True)
 
             if self.rank == 0:
@@ -341,7 +261,6 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 del state_dict
                 del save_model
 
-            # wait for rank0 to dump hf_model to local
             torch.distributed.barrier()
 
         self.previous_saved_paths.append(local_path)

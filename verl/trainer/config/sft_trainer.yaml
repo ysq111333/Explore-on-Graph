@@ -23,6 +23,7 @@ data:
     path: null
     name: null
   use_shm: False
+  max_token_filter: 15000  # Add this line
 model:
   partial_pretrain: ~/models/gemma-1.1-7b-it
   use_shm: False

@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 import unittest
@@ -20,9 +8,7 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
-
 class TestConfigComparison(unittest.TestCase):
-    """Test that current configs match their legacy counterparts exactly."""
 
     ignored_keys = [
         "enable_gradient_checkpointing",
@@ -35,12 +21,6 @@ class TestConfigComparison(unittest.TestCase):
     def _compare_configs_recursively(
         self, current_config, legacy_config, path="", legacy_allow_missing=True, current_allow_missing=False
     ):
-        """Recursively compare two OmegaConf configs and assert they are identical.
-
-        Args:
-            legacy_allow_missing (bool): sometimes the legacy megatron config contains fewer keys and
-              we allow that to happen
-        """
         if isinstance(current_config, dict) and isinstance(legacy_config, dict):
             current_keys = set(current_config.keys())
             legacy_keys = set(legacy_config.keys())
@@ -48,7 +28,6 @@ class TestConfigComparison(unittest.TestCase):
             missing_in_current = legacy_keys - current_keys
             missing_in_legacy = current_keys - legacy_keys
 
-            # Ignore specific keys that are allowed to be missing
             for key in self.ignored_keys:
                 if key in missing_in_current:
                     missing_in_current.remove(key)
@@ -62,7 +41,7 @@ class TestConfigComparison(unittest.TestCase):
                 else:
                     self.fail(f"Keys missing in current config at {path}: {missing_in_current}")
             if missing_in_legacy:
-                # if the legacy
+
                 msg = f"Keys missing in legacy config at {path}: {missing_in_legacy}"
                 if legacy_allow_missing:
                     warnings.warn(msg, stacklevel=1)
@@ -89,7 +68,6 @@ class TestConfigComparison(unittest.TestCase):
             )
 
     def test_ppo_trainer_config_matches_legacy(self):
-        """Test that ppo_trainer.yaml matches legacy_ppo_trainer.yaml exactly."""
         import os
 
         from hydra import compose, initialize_config_dir
@@ -113,7 +91,6 @@ class TestConfigComparison(unittest.TestCase):
             GlobalHydra.instance().clear()
 
     def test_ppo_megatron_trainer_config_matches_legacy(self):
-        """Test that ppo_megatron_trainer.yaml matches legacy_ppo_megatron_trainer.yaml exactly."""
 
         GlobalHydra.instance().clear()
 
@@ -135,7 +112,6 @@ class TestConfigComparison(unittest.TestCase):
             GlobalHydra.instance().clear()
 
     def test_load_component(self):
-        """Test that ppo_megatron_trainer.yaml matches legacy_ppo_megatron_trainer.yaml exactly."""
 
         GlobalHydra.instance().clear()
         configs_to_load = [
@@ -151,7 +127,6 @@ class TestConfigComparison(unittest.TestCase):
                     compose(config_name=config_file)
             finally:
                 GlobalHydra.instance().clear()
-
 
 if __name__ == "__main__":
     unittest.main()

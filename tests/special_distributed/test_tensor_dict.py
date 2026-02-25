@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 
@@ -22,7 +10,6 @@ import torch.distributed
 
 from verl.protocol import DataProto, all_gather_data_proto
 from verl.utils.distributed import initialize_global_process_group
-
 
 def test_all_gather_data_proto():
     device_mesh = torch.distributed.device_mesh.init_device_mesh("cuda", mesh_shape=[2, 2], mesh_dim_names=["dp", "tp"])
@@ -54,7 +41,6 @@ def test_all_gather_data_proto():
     assert (data.non_tensor_batch["labels"] == expected_labels).all()
     assert data.meta_info == {"info": "test_info"}
 
-
 def test_vocab_parallel_entropy():
     from megatron.core import parallel_state as mpu
 
@@ -73,7 +59,6 @@ def test_vocab_parallel_entropy():
     logits = torch.randn(batch_size * seqlen, vocab_size, device="cuda", requires_grad=True)
     target = torch.randint(low=0, high=vocab_size, size=(batch_size * seqlen,), device="cuda", dtype=torch.int64)
 
-    # broadcast across tp
     torch.distributed.broadcast(
         logits, mpu.get_tensor_model_parallel_src_rank(), group=mpu.get_tensor_model_parallel_group()
     )
@@ -84,7 +69,6 @@ def test_vocab_parallel_entropy():
     tp_rank = mpu.get_tensor_model_parallel_rank()
     vocab_size_per_tp = vocab_size // mpu.get_tensor_model_parallel_world_size()
 
-    # get the local logits of each tp
     vocab_parallel_logits = (
         logits.clone().detach()[:, tp_rank * vocab_size_per_tp : (tp_rank + 1) * vocab_size_per_tp].requires_grad_()
     )
@@ -104,7 +88,7 @@ def test_vocab_parallel_entropy():
     torch.testing.assert_close(
         logits.grad[:, tp_rank * vocab_size_per_tp : (tp_rank + 1) * vocab_size_per_tp], vocab_parallel_logits.grad
     )
-    # make sure logits is not altered
+
     torch.testing.assert_close(
         logits[:, tp_rank * vocab_size_per_tp : (tp_rank + 1) * vocab_size_per_tp], vocab_parallel_logits
     )
@@ -113,7 +97,6 @@ def test_vocab_parallel_entropy():
         print("test_vocab_parallel_entropy passes")
 
     mpu.destroy_model_parallel()
-
 
 if __name__ == "__main__":
     local_rank, rank, world_size = initialize_global_process_group()

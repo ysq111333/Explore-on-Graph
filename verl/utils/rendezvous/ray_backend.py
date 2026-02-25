@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import logging
 import time
@@ -19,7 +7,6 @@ import ray
 from cupy.cuda.nccl import NcclCommunicator, get_unique_id
 from ray.util import list_named_actors
 
-
 @ray.remote
 class NCCLIDStore:
     def __init__(self, nccl_id):
@@ -27,7 +14,6 @@ class NCCLIDStore:
 
     def get(self):
         return self._nccl_id
-
 
 def get_nccl_id_store_by_name(name):
     all_actors = list_named_actors(all_namespaces=True)
@@ -40,7 +26,6 @@ def get_nccl_id_store_by_name(name):
     elif len(matched_actors) == 0:
         logging.info("failed to get any actor named %s", name)
     return None
-
 
 def create_nccl_communicator_in_ray(
     rank: int, world_size: int, group_name: str, max_retries: int = 100, interval_s: int = 5

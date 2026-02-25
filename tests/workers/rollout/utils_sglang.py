@@ -1,16 +1,5 @@
-# Copyright 2023-2024 SGLang Team
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
+
 import os
 from datetime import timedelta
 
@@ -21,8 +10,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils.torch_functional import pad_sequence_to_length
 
-
-# ====================== utils ======================
 def levenshtein(s1, s2):
     m, n = len(s1), len(s2)
     dp = [[0] * (n + 1) for _ in range(m + 1)]
@@ -35,7 +22,6 @@ def levenshtein(s1, s2):
             cost = 0 if s1[i - 1] == s2[j - 1] else 1
             dp[i][j] = min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
     return dp[m][n]
-
 
 def are_lists_similar(a, b, threshold=10):
     if len(a) != len(b):
@@ -51,11 +37,10 @@ def are_lists_similar(a, b, threshold=10):
     print(f"Total difference: {percentage_difference:.2f}%")
     return percentage_difference <= threshold
 
-
 def initialize_global_process_group(timeout_second=36000, spmd=False):
     import torch.distributed
 
-    if not torch.distributed.is_initialized():  # Check if already initialized
+    if not torch.distributed.is_initialized():
         print("Initializing process group...")
         torch.distributed.init_process_group(timeout=timedelta(seconds=timeout_second))
     else:
@@ -69,7 +54,7 @@ def initialize_global_process_group(timeout_second=36000, spmd=False):
     CUDA_VISIBLE_DEVICES = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if not CUDA_VISIBLE_DEVICES:
         if spmd:
-            # CUDA_VISIBLE_DEVICES = ','.join(str(i) for i in range(tensor_parallel_size))
+
             CUDA_VISIBLE_DEVICES = ",".join(str(i) for i in range(world_size))
         else:
             CUDA_VISIBLE_DEVICES = str(local_rank)
@@ -78,19 +63,16 @@ def initialize_global_process_group(timeout_second=36000, spmd=False):
 
     return local_rank, rank, world_size
 
-
 def clean_torchelastic_env():
     for k in ["TORCHELASTIC_USE_AGENT_STORE"]:
         if k in os.environ:
             del os.environ[k]
-
 
 def load_tokenizer_and_model(local_model_path, dtype="bfloat16"):
     tokenizer = AutoTokenizer.from_pretrained(local_model_path, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(local_model_path, torch_dtype=getattr(torch, dtype), device_map="cuda")
     return tokenizer, model
-
 
 def prepare_inputs(tokenizer, prompts, max_prompt_length):
     pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -102,7 +84,6 @@ def prepare_inputs(tokenizer, prompts, max_prompt_length):
     position_ids = compute_position_id_with_mask(attention_mask)
     position_ids = pad_sequence_to_length(position_ids, max_prompt_length, pad_token_id=0, left_pad=True)
     return input_ids, attention_mask, position_ids
-
 
 def generate_hf_output(model, input_ids, attention_mask, tokenizer, max_response_length):
     generation_config = GenerationConfig(do_sample=False)
@@ -120,7 +101,6 @@ def generate_hf_output(model, input_ids, attention_mask, tokenizer, max_response
     seq = output.sequences
     response = seq[:, input_ids.shape[1] :]
     return tokenizer.batch_decode(response)
-
 
 def get_rollout_config(
     max_response_length,
@@ -158,7 +138,7 @@ def get_rollout_config(
             "prompt_length": max_prompt_length,
             "response_length": max_response_length,
             "tensor_model_parallel_size": tensor_parallel_size,
-            # set to 128MB only for testing
+
             "update_weights_bucket_megabytes": 128,
             "multi_turn": {
                 "max_assistant_turns": 4,

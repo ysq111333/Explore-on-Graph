@@ -1,18 +1,3 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright 2023-2024 SGLang Team
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# Adapted from tests/workers/rollout/test_sglang_async_rollout_sf_tools.py
 
 
 import asyncio
@@ -48,7 +33,6 @@ DEFAULT_USER_CONTENT_PREFIX = (
 )
 user_content = DEFAULT_USER_CONTENT_PREFIX.rstrip("\n") + "How's the weather lately?"
 
-
 def get_search_messages():
     user_prompt = {
         "role": "user",
@@ -74,7 +58,6 @@ def get_search_messages():
         "content": "<answer>Today is sunny and tomorrow will be cloudy in Beijing.</answer>",
     }
 
-    # Mock search tool responses
     tool_return_0_msg = {"role": "tool", "content": "Today's weather in Beijing is sunny."}
     tool_return_1_msg = {"role": "tool", "content": "Tomorrow's weather in Beijing is cloudy."}
 
@@ -84,7 +67,6 @@ def get_search_messages():
 
     return user_prompts, expect_turn_array, tool_return_array
 
-
 class TestRolloutWithSearchTools:
     @pytest.fixture
     def qwen_tokenizer(self):
@@ -93,7 +75,6 @@ class TestRolloutWithSearchTools:
         tokenizer.pad_token = tokenizer.eos_token
         return tokenizer
 
-    # we only need this for tokenizer
     @pytest.fixture
     def qwen_model_config(self):
         local_model_path = "Qwen/Qwen2.5-0.5B"
@@ -165,7 +146,6 @@ class TestRolloutWithSearchTools:
 
     @pytest.fixture
     def mock_rollout(self, search_rollout_config, qwen_tokenizer, qwen_model_config):
-        """Mock the rollout instance with sampling_params initialized."""
         with (
             patch.object(SGLangRollout, "_init_distributed_env", return_value=None),
             patch.object(SGLangRollout, "_init_inference_engine", return_value=None),
@@ -203,7 +183,7 @@ class TestRolloutWithSearchTools:
         from verl.tools.search_tool import SearchTool
 
         assert isinstance(rollout._tool_map["search"], SearchTool)
-        # depend on the tokenizer
+
         assert rollout._tool_call_parser_type == "qwen25"
 
     @patch.object(SGLangRollout, "_init_distributed_env", return_value=None)
@@ -297,7 +277,6 @@ class TestRolloutWithSearchTools:
     def test_tool_call_basic_case(self, mock_execute, mock_rollout, search_data_proto, search_data):
         _, expect_turn_array, tool_return_array = search_data
 
-        # Mock search tool execution to return predefined responses
         mock_execute.side_effect = [(msg, 0.0, {"status": "success"}) for msg in tool_return_array]
 
         mock_rollout.config.multi_turn.max_assistant_turns = 10
@@ -336,14 +315,13 @@ class TestRolloutWithSearchTools:
             asyncio.gather(*[mock_rollout._async_rollout_a_request(req, True, False) for req in req_list])
         )
 
-        # Verify conversation completed successfully with proper tool usage
         output_req = output_req_list[0]
         assert output_req.state == AsyncRolloutRequestStateEnum.COMPLETED
         assert "search" in output_req.metrics
         assert output_req.metrics["search"][0]["status"] == "success"
         assert mock_execute.await_count == 2
-        assert len(output_req.messages) == 6  # user + 3*assistant + 2*tool_call
-        # Verify tool response messages contain expected content
+        assert len(output_req.messages) == 6
+
         search_counter = 0
         for msg in output_req.messages:
             if msg.role == "tool":
@@ -355,7 +333,6 @@ class TestRolloutWithSearchTools:
     def test_tool_call_batch_case(self, mock_execute, mock_rollout, search_data_proto, search_data):
         _, expect_turn_array, tool_return_array = search_data
 
-        # Mock tool execution for large batch (100 requests * 2 calls each)
         mock_execute.side_effect = [
             (tool_return_array[0], 0.0, {"status": "success"}),
             (tool_return_array[1], 0.0, {"status": "success"}),
@@ -405,14 +382,13 @@ class TestRolloutWithSearchTools:
                 asyncio.gather(*[mock_rollout._async_rollout_a_request(r, True, False) for r in req_list])
             )
 
-        # Verify all requests completed successfully
         assert len(output_req_list) == req_nums
         for out_req in output_req_list:
             assert out_req.state == AsyncRolloutRequestStateEnum.COMPLETED
             assert "search" in out_req.metrics
             for metric in out_req.metrics["search"]:
                 assert metric["status"] == "success"
-            assert len(out_req.messages) == 6  # user + 3 assistant + 2 tool
+            assert len(out_req.messages) == 6
             assert sum(1 for m in out_req.messages if m.role == "tool") == 2
 
         assert mock_execute.await_count == 2 * req_nums

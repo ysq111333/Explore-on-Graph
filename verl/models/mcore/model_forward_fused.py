@@ -1,18 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from collections import OrderedDict
 from typing import Optional
@@ -34,14 +20,13 @@ from verl.utils.model import CausalLMOutputForPPO
 from .qwen2_5_vl.model import Qwen2_5VLModel
 from .util import postprocess_packed_seqs_for_dict_output
 
-
 def patch_fused_forward(model: torch.nn.Module):
     model = unwrap_model(model)
     if isinstance(model, GPTModel):
         model = model
     elif isinstance(model, Qwen2_5VLModel):
         if not hasattr(model, "language_model"):
-            # the qwen2.5vl model might only have vision_model
+
             return
         model = model.language_model
     else:
@@ -49,7 +34,6 @@ def patch_fused_forward(model: torch.nn.Module):
     model.forward_backup = model.forward
     model.forward = _fused_GPTModel_forward.__get__(model, model.__class__)
     return
-
 
 def unpatch_fused_forward(model: torch.nn.Module):
     model = unwrap_model(model)
@@ -61,7 +45,6 @@ def unpatch_fused_forward(model: torch.nn.Module):
         raise ValueError("Model is not a GPTModel or Qwen2_5VLModel")
     model.forward = model.forward_backup
     return
-
 
 def fused_forward_gptmodel(
     model: GPTModel,
@@ -92,7 +75,7 @@ def fused_forward_gptmodel(
     )
 
     if post_process:
-        # output_orig is in type of CausalLMOutputForPPO
+
         output = postprocess_packed_seqs_for_dict_output(
             labels_mask_rmpad,
             output_orig,
@@ -106,7 +89,6 @@ def fused_forward_gptmodel(
         output = output_orig
     return output
 
-
 def fused_forward_qwen2_5_vl(
     model: Qwen2_5VLModel,
     input_ids: Tensor,
@@ -117,7 +99,7 @@ def fused_forward_qwen2_5_vl(
     multi_modal_inputs=None,
     **kwargs,
 ):
-    # pre_process = unwrap_model(model).pre_process
+
     post_process = unwrap_model(model).post_process
 
     pixel_values = (
@@ -144,7 +126,7 @@ def fused_forward_qwen2_5_vl(
         labels=labels,
     )
     if post_process:
-        # output_orig is in type of CausalLMOutputForPPO
+
         output = postprocess_packed_seqs_for_dict_output(
             labels_mask_rmpad,
             output_orig,
@@ -157,7 +139,6 @@ def fused_forward_qwen2_5_vl(
     else:
         output = output_orig
     return output
-
 
 def _fused_GPTModel_forward(
     self,
@@ -175,33 +156,22 @@ def _fused_GPTModel_forward(
     loss_mask: Optional[Tensor] = None,
     temperature: float = 1.0,
 ) -> CausalLMOutputForPPO:
-    """
-    Forward pass for GPT models with fused kernel support.
 
-    Patch https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/models/gpt/gpt_model.py
-    """
-
-    # If decoder_input is provided (not None), then input_ids and position_ids are ignored.
-    # Otherwise, apply embedding layer on input_ids and position_ids to get decoder_input.
-
-    # Decoder embedding.
     if decoder_input is not None:
         pass
     elif self.pre_process:
         decoder_input = self.embedding(input_ids=input_ids, position_ids=position_ids)
     else:
-        # intermediate stage of pipeline
-        # decoder will get hidden_states from encoder.input_tensor
+
         decoder_input = None
 
-    # Rotary positional embeddings (embedding is None for PP intermediate devices)
     rotary_pos_emb = None
     rotary_pos_cos = None
     rotary_pos_sin = None
     if self.position_embedding_type == "rope" and not self.config.multi_latent_attention:
         if not self.training and self.config.flash_decode and inference_context:
             assert inference_context.is_static_batching(), "GPTModel currently only supports static inference batching."
-            # Flash decoding uses precomputed cos and sin for RoPE
+
             rotary_pos_cos, rotary_pos_sin = self.rotary_pos_emb_cache.setdefault(
                 inference_context.max_sequence_length,
                 self.rotary_pos_emb.get_cos_sin(inference_context.max_sequence_length),
@@ -218,7 +188,7 @@ def _fused_GPTModel_forward(
         if self.training or not self.config.flash_decode:
             rotary_pos_emb = self.rotary_pos_emb(position_ids, self.mrope_section)
         else:
-            # Flash decoding uses precomputed cos and sin for RoPE
+
             raise NotImplementedError(
                 "Flash decoding uses precomputed cos and sin for RoPE, not implmented in MultimodalRotaryEmbedding yet."
             )
@@ -233,16 +203,11 @@ def _fused_GPTModel_forward(
         sequence_len_offset = torch.tensor(
             [inference_context.sequence_len_offset] * inference_context.current_batch_size,
             dtype=torch.int32,
-            device=rotary_pos_cos.device,  # Co-locate this with the rotary tensors
+            device=rotary_pos_cos.device,
         )
     else:
         sequence_len_offset = None
 
-    # Wrap decoder_input to allow the decoder (TransformerBlock) to delete the
-    # reference held by this caller function, enabling early garbage collection for
-    # skip inference
-
-    # Run decoder.
     hidden_states = self.decoder(
         hidden_states=decoder_input,
         attention_mask=attention_mask,
@@ -255,11 +220,9 @@ def _fused_GPTModel_forward(
         **(extra_block_kwargs or {}),
     )
 
-    # Process inference output.
     if inference_context and not inference_context.is_static_batching():
         hidden_states = inference_context.last_token_logits(hidden_states.squeeze(1).unsqueeze(0)).unsqueeze(1)
 
-    # logits and loss
     output_weight = None
     if self.share_embeddings_and_output_weights:
         output_weight = self.shared_embedding_or_output_weight()

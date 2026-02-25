@@ -1,19 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-This file contains a Megatron style Hybrid Engine that shares the weights of the actor with the inference engine.
-"""
+
 
 import inspect
 import logging
@@ -43,41 +28,7 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
-"""
-Megatron Hybrid Engine:
-- During training, only the current pp stage holds the parameters
-- Before inference, broadcast the parameters of the current pp rank 
-   to all other pp ranks (all pp ranks holds all the parameters)
-- Bind the parameters to the inference engine
-- Do inference in tp. pp is treated as additional dp
-- After inference, all the parameters that doesn't belong to this pp rank is freed.
-"""
-
-
 class MegatronVLLMShardingManager(BaseShardingManager):
-    """A sharding manager that bridges Megatron-LM training with vLLM inference.
-
-    This class handles the parameter sharding and communication between:
-    - Megatron-LM's tensor/expert parallel training setup
-    - vLLM's tensor parallel inference setup
-
-    Key responsibilities:
-    - Manages parameter broadcasting between training and inference configurations
-    - Handles weight conversion between Megatron and HuggingFace formats
-    - Coordinates memory management between training and inference phases
-    - Maintains random state consistency across different parallel groups
-
-    Args:
-        actor_module (nn.ModuleList): The Megatron-LM model being trained
-        inference_engine (LLM): The vLLM inference engine
-        model_config: Configuration for the actor's model
-        transformer_config: Transformer-specific configuration for the model
-        rollout_config: Configuration for rollout
-        layer_name_mapping: Mapping between Megatron and HF layer names
-        weight_converter (McoreToHFWeightConverterBase): Converts weights between formats
-        device_mesh: Device mesh for parallel operations
-        offload_param (bool): Whether to offload parameters when not in use
-    """
 
     @check_device_is_available()
     def __init__(
@@ -97,7 +48,6 @@ class MegatronVLLMShardingManager(BaseShardingManager):
         self.inference_engine = inference_engine
         self.offload_param = offload_param
 
-        # For AsyncLLM, inference_engine and model_runner are defer initialized in vLLMAsyncRollout.load_model
         self.model_runner = (
             self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner
             if self.inference_engine
@@ -110,7 +60,7 @@ class MegatronVLLMShardingManager(BaseShardingManager):
         self.layer_name_mapping = layer_name_mapping
         self.weight_converter = weight_converter
         self.bridge = bridge
-        # initialize groups for vllm inference
+
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
 
@@ -133,7 +83,7 @@ class MegatronVLLMShardingManager(BaseShardingManager):
         self.torch_random_states = get_torch_device().get_rng_state()
         if self.device_mesh is not None:
             gen_dp_rank = self.device_mesh["dp"].get_local_rank()
-            get_torch_device().manual_seed(gen_dp_rank + 1000)  # make sure all tp ranks have the same random states
+            get_torch_device().manual_seed(gen_dp_rank + 1000)
             self.gen_random_states = get_torch_device().get_rng_state()
             get_torch_device().set_rng_state(self.torch_random_states)
         else:
@@ -180,7 +130,6 @@ class MegatronVLLMShardingManager(BaseShardingManager):
             ):
                 self.inference_engine.wake_up(tags=["kv_cache"])
 
-            # important: need to manually set the random states of each tp to be identical.
             if self.device_mesh is not None:
                 self.torch_random_states = get_torch_device().get_rng_state()
                 get_torch_device().set_rng_state(self.gen_random_states)
@@ -194,18 +143,16 @@ class MegatronVLLMShardingManager(BaseShardingManager):
 
         get_torch_device().empty_cache()
 
-        # restore random states
         if self.device_mesh is not None:
             self.gen_random_states = get_torch_device().get_rng_state()
             get_torch_device().set_rng_state(self.torch_random_states)
 
     @GPUMemoryLogger(role="megatron vllm sharding_manager", logger=logger)
     def preprocess_data(self, data: DataProto) -> DataProto:
-        # DP_COMPUTE_PROTO: all training ranks are dp, the same as fsdp
+
         if self.infer_tp_size == 1:
             return data
 
-        # TODO: Current impl doesn't consider FSDP with torch micro-dp
         group = vllm_ps.get_tensor_model_parallel_group().device_group
 
         all_gather_data_proto(data=data, process_group=group)
@@ -213,7 +160,7 @@ class MegatronVLLMShardingManager(BaseShardingManager):
 
     @GPUMemoryLogger(role="megatron vllm sharding_manager", logger=logger)
     def postprocess_data(self, data: DataProto) -> DataProto:
-        # DP_COMPUTE_PROTO: all training ranks are dp, the same as fsdp
+
         if self.infer_tp_size == 1:
             return data
         return data.chunk(chunks=self.infer_tp_size)[self.infer_tp_rank]

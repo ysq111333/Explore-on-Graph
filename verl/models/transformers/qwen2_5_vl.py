@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from dataclasses import dataclass
 from typing import Optional
@@ -21,12 +9,10 @@ from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
     Qwen2_5_VLForConditionalGeneration,
 )
 
-
 @dataclass
 class Qwen2_5_VLCausalLMOutputForPPO(Qwen2_5_VLCausalLMOutputWithPast):
     log_probs: Optional[torch.FloatTensor] = None
     entropy: Optional[torch.FloatTensor] = None
-
 
 def forward_base_model(
     self: Qwen2_5_VLForConditionalGeneration,
@@ -47,10 +33,6 @@ def forward_base_model(
     cache_position: Optional[torch.LongTensor] = None,
     second_per_grid_ts: Optional[torch.Tensor] = None,
 ) -> tuple | Qwen2_5_VLCausalLMOutputWithPast:
-    r"""
-    Copy paste Qwen2_5_VL's forward
-    https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/model/qwen2_5_vl.py
-    ```"""
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     output_hidden_states = (
         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -100,9 +82,8 @@ def forward_base_model(
         if attention_mask is not None:
             attention_mask = attention_mask.to(inputs_embeds.device)
 
-    # if we get 4D attention mask we cannot calculate rope deltas anymore. TODO @raushan fixme
     if position_ids is None and (attention_mask is None or attention_mask.ndim == 2):
-        # calculate RoPE index once per generation in the pre-fill stage only
+
         if (cache_position is not None and cache_position[0] == 0) or self.rope_deltas is None:
             position_ids, rope_deltas = self.get_rope_index(
                 input_ids,
@@ -112,13 +93,13 @@ def forward_base_model(
                 attention_mask,
             )
             self.rope_deltas = rope_deltas
-        # then use the prev pre-calculated rope-deltas to get the correct position ids
+
         else:
             batch_size, seq_length, _ = inputs_embeds.shape
             delta = (cache_position[0] + self.rope_deltas).to(inputs_embeds.device) if cache_position is not None else 0
             position_ids = torch.arange(seq_length, device=inputs_embeds.device)
             position_ids = position_ids.view(1, -1).expand(batch_size, -1)
-            if cache_position is not None:  # otherwise `deltas` is an int `0`
+            if cache_position is not None:
                 delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=0)
             position_ids = position_ids.add(delta)
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
@@ -136,7 +117,6 @@ def forward_base_model(
         cache_position=cache_position,
     )
     return outputs
-
 
 def forward_with_torch_backend(
     self: Qwen2_5_VLForConditionalGeneration,
@@ -187,7 +167,6 @@ def forward_with_torch_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_torch_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:
@@ -211,7 +190,6 @@ def forward_with_torch_backend(
         attentions=outputs.attentions,
         rope_deltas=rope_deltas,
     )
-
 
 def forward_with_triton_backend(
     self: Qwen2_5_VLForConditionalGeneration,
@@ -262,7 +240,6 @@ def forward_with_triton_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_triton_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:

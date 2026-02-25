@@ -1,23 +1,8 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from verl.utils.megatron_utils import unwrap_model
 
 from .util import postprocess_packed_seqs, preprocess_packed_seqs, recover_left_padding, remove_left_padding
-
 
 def gptmodel_forward(
     model,
@@ -31,7 +16,6 @@ def gptmodel_forward(
     logits_processor_args: dict = None,
     **kwargs,
 ):
-    """Default forward pass for GPT models with optional sequence packing."""
     pre_process = unwrap_model(model).pre_process
     post_process = unwrap_model(model).post_process
     if pack_seqs:
@@ -73,7 +57,6 @@ def gptmodel_forward(
     if value_model and post_process:
         output = output[..., 0]
     return output
-
 
 def gptmodel_forward_qwen2_5_vl(
     model,

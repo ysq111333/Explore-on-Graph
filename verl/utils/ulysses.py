@@ -1,21 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Utilities for DeepSpeed Ulysses Sequence Parallelism.
-DeepSpeed Ulysses Paper: https://arxiv.org/abs/2309.14509
-Inspired from: https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/sequence/layer.py
-"""
+
 
 from typing import Any, Optional
 
@@ -26,38 +9,21 @@ from torch.distributed import ProcessGroup
 
 _ULYSSES_SEQUENCE_PARALLEL_GROUP = None
 
-
 def set_ulysses_sequence_parallel_group(group: dist.ProcessGroup):
-    """
-    Set ulysses sequence parallel process group.
-    """
     global _ULYSSES_SEQUENCE_PARALLEL_GROUP
     _ULYSSES_SEQUENCE_PARALLEL_GROUP = group
 
-
 def get_ulysses_sequence_parallel_group() -> Optional[dist.ProcessGroup]:
-    """
-    Get ulysses sequence parallel process group.
-    """
     global _ULYSSES_SEQUENCE_PARALLEL_GROUP
     return _ULYSSES_SEQUENCE_PARALLEL_GROUP
 
-
 def get_ulysses_sequence_parallel_world_size(group: ProcessGroup = None) -> int:
-    """
-    Get ulysses sequence parallel world size.
-    """
     group = get_ulysses_sequence_parallel_group() if group is None else group
     return dist.get_world_size(group) if group else 1
 
-
 def get_ulysses_sequence_parallel_rank(group: ProcessGroup = None) -> int:
-    """
-    Get ulysses sequence parallel rank.
-    """
     group = get_ulysses_sequence_parallel_group() if group is None else group
     return dist.get_rank(group) if group else 0
-
 
 def gather_seq_scatter_heads(
     x: Tensor,
@@ -66,12 +32,6 @@ def gather_seq_scatter_heads(
     unpadded_dim_size: int = 0,
     group: ProcessGroup = None,
 ) -> Tensor:
-    """
-    A func to sync embedding input with alltoall in sequence parallel
-    gather sequence dimension and scatter head dim:
-    e.g. seq_dim: 1, head_dim: 2
-    [bsz, seq/n, h, ...] -> [bsz, seq, h/n, ...]
-    """
     group = get_ulysses_sequence_parallel_group() if group is None else group
     if not group:
         return x
@@ -82,14 +42,7 @@ def gather_seq_scatter_heads(
         x = _unpad_tensor(x, seq_dim, padding_size)
     return x
 
-
 def gather_heads_scatter_seq(x: Tensor, head_dim: int, seq_dim: int, group: ProcessGroup = None) -> Tensor:
-    """
-    A func to sync attention result with alltoall in sequence parallel
-    gather head dimension and scatter seq dim:
-    e.g. seq_dim: 1, head_dim: 2
-    [bsz, seq, h/n, ...] -> [bsz, seq/n, h, ...]
-    """
     group = get_ulysses_sequence_parallel_group() if group is None else group
     if not group:
         return x
@@ -100,35 +53,31 @@ def gather_heads_scatter_seq(x: Tensor, head_dim: int, seq_dim: int, group: Proc
         x = _pad_tensor(x, seq_dim, padding_size)
     return SeqAllToAll.apply(group, x, seq_dim, head_dim, False)
 
-
 def _pad_tensor(x: Tensor, dim: int, padding_size: int) -> Tensor:
     shape = list(x.shape)
     shape[dim] = padding_size
     pad = torch.zeros(shape, dtype=x.dtype, device=x.device)
     return torch.cat([x, pad], dim=dim)
 
-
 def _unpad_tensor(x: Tensor, dim: int, padding_size: int) -> Tensor:
     slc = [slice(None)] * len(x.shape)
     slc[dim] = slice(0, -padding_size)
     return x[slc]
-
 
 def slice_input_tensor(x: Tensor, dim: int, padding: bool = True, group: ProcessGroup = None) -> Tensor:
     group = get_ulysses_sequence_parallel_group() if group is None else group
     sp_world_size = dist.get_world_size(group)
     sp_rank = get_ulysses_sequence_parallel_rank()
     dim_size = x.size(dim)
-    # pad before slice
+
     if padding and dim_size % sp_world_size:
         padding_size = sp_world_size - (dim_size % sp_world_size)
         x = _pad_tensor(x, dim, padding_size)
-    # slice the input tensor
+
     parts = x.size(dim) // sp_world_size
     slc = [slice(None)] * len(x.shape)
     slc[dim] = slice(sp_rank * parts, (sp_rank + 1) * parts)
     return x[slc].contiguous()
-
 
 def all_to_all_tensor(
     local_input: Tensor,
@@ -151,7 +100,6 @@ def all_to_all_tensor(
         return wait
     return torch.cat(output_list, dim=gather_dim).contiguous()
 
-
 def all_gather_tensor(local_tensor: Tensor, group: Optional[dist.ProcessGroup] = None, async_op: bool = False):
     group = get_ulysses_sequence_parallel_group() if group is None else group
     sp_world_size = dist.get_world_size(group=group)
@@ -160,7 +108,6 @@ def all_gather_tensor(local_tensor: Tensor, group: Optional[dist.ProcessGroup] =
     output = torch.empty(output_shape, dtype=local_tensor.dtype, device=local_tensor.device)
     dist.all_gather_into_tensor(output, local_tensor, group=group, async_op=async_op)
     return output
-
 
 class SeqAllToAll(torch.autograd.Function):
     @staticmethod
@@ -190,7 +137,6 @@ class SeqAllToAll(torch.autograd.Function):
             None,
         )
 
-
 class Gather(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -214,7 +160,7 @@ class Gather(torch.autograd.Function):
 
         local_shape = list(local_tensor.size())
         split_size = local_shape[0]
-        part_size = local_shape[gather_dim]  # store original size
+        part_size = local_shape[gather_dim]
         ctx.part_size = part_size
 
         output = all_gather_tensor(local_tensor, group, async_op)
@@ -233,12 +179,10 @@ class Gather(torch.autograd.Function):
             None,
         )
 
-
 def gather_outpus_and_unpad(*args, **kwargs):
     raise RuntimeError(
         "please use verl.utils.ulysses.gather_outputs_and_unpad instead of verl.utils.ulysses.gather_outpus_and_unpad"
     )
-
 
 def gather_outputs_and_unpad(
     x: Tensor,
@@ -248,21 +192,6 @@ def gather_outputs_and_unpad(
     grad_scaler: bool = True,
     group: Optional[dist.ProcessGroup] = None,
 ):
-    """
-    Gather a tensor across a process group and optionally unpad its padded elements.
-
-    Args:
-        x (Tensor): Input tensor to gather.
-        gather_dim (int): Dimension along which to gather across ranks.
-        unpad_dim (int, optional): Dimension from which to remove padding. If None, no unpadding.
-        padding_size (int): Number of padding elements to remove on `unpad_dim`. Defaults to 0.
-        grad_scaler (bool): Whether to apply gradient scaling during gather. Defaults to True.
-        group (ProcessGroup, optional): Process group for gathering. If None, uses
-            `get_ulysses_sequence_parallel_group()`. If still None, returns `x` unchanged.
-
-    Returns:
-        Tensor: The gathered tensor, with padding removed if requested.
-    """
     group = get_ulysses_sequence_parallel_group() if group is None else group
     if group is None:
         return x
@@ -273,7 +202,6 @@ def gather_outputs_and_unpad(
             return x
         x = _unpad_tensor(x, unpad_dim, padding_size)
     return x
-
 
 def ulysses_pad(input_ids_rmpad: torch.Tensor, position_ids_rmpad: Optional[torch.Tensor] = None, sp_size: int = 1):
     if position_ids_rmpad is not None:
@@ -292,34 +220,14 @@ def ulysses_pad(input_ids_rmpad: torch.Tensor, position_ids_rmpad: Optional[torc
             position_ids_rmpad = torch.cat((position_ids_rmpad, pad_pos_ids), dim=-1)
     return input_ids_rmpad, position_ids_rmpad, pad_size
 
-
 def ulysses_pad_and_slice_inputs(
     input_ids_rmpad: torch.Tensor, position_ids_rmpad: Optional[torch.Tensor] = None, sp_size: int = 1
 ):
-    """
-    Pad and slice input_ids to be divisible by sp_size
-    Pad position_ids to be divisible by sp_size.
-
-    Note both input_ids_rmpad and position_ids_rmpad will be padded and sliced.
-
-    The is the utility of pre-forward for ulysses sequence parallelism
-
-    Args:
-        input_ids_rmpad: shape of [bsz, seqlen]
-        position_ids_rmpad: shape of [bsz, seqlen], where bsz must be 1
-        sp_size (int): ulysses sequence parallelism size
-
-    Returns:
-        torch.Tensor: padded and sliced input_ids
-        torch.Tensor: padded and sliced position_ids
-        int: pad size
-    """
     input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad(input_ids_rmpad, position_ids_rmpad, sp_size)
     input_ids_rmpad = slice_input_tensor(input_ids_rmpad, dim=1, padding=False)
     if position_ids_rmpad is not None:
         position_ids_rmpad = slice_input_tensor(position_ids_rmpad, dim=1, padding=False)
     return input_ids_rmpad, position_ids_rmpad, pad_size
-
 
 def validate_ulysses_config(num_heads, ulysses_sequence_size):
     if ulysses_sequence_size > 1:

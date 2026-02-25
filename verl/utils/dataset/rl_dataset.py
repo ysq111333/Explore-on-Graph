@@ -1,18 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2023-2024 SGLang Team
-# Copyright 2025 ModelBest Inc. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import copy
 import logging
@@ -33,19 +19,7 @@ from verl.utils.model import compute_position_id_with_mask
 
 logger = logging.getLogger(__name__)
 
-
 def collate_fn(data_list: list[dict]) -> dict:
-    """
-    Collate a batch of sample dicts into batched tensors and arrays.
-
-    Args:
-        data_list: List of dicts mapping feature names to torch.Tensor or other values.
-
-    Returns:
-        Dict where tensor entries are stacked into a torch.Tensor of shape
-        (batch_size, \*dims) and non-tensor entries are converted to
-        np.ndarray of dtype object with shape (batch_size,).
-    """
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
 
@@ -64,23 +38,7 @@ def collate_fn(data_list: list[dict]) -> dict:
 
     return {**tensors, **non_tensors}
 
-
 class RLHFDataset(Dataset):
-    """
-    Load and preprocess RLHF data from Parquet files.
-
-    - Caches files locally.
-    - Reads into a HuggingFace Dataset and tokenizes prompts.
-    - Optionally handles images/videos via a ProcessorMixin.
-    - Filters prompts over a max length.
-    - Supports resuming from checkpoints.
-
-    Args:
-        data_files (str or list): Path(s) to Parquet file(s).
-        tokenizer (PreTrainedTokenizer): For the tokenization of text to token IDs.
-        config (DictConfig): Options like cache_dir, prompt_key, max_prompt_length, truncation, etc.
-        processor (ProcessorMixin, optional): Multimodal preprocessor for images/videos.
-    """
 
     def __init__(
         self,
@@ -93,7 +51,7 @@ class RLHFDataset(Dataset):
             data_files = [data_files]
 
         self.data_files = copy.deepcopy(data_files)
-        self.original_data_files = copy.deepcopy(data_files)  # use for resume
+        self.original_data_files = copy.deepcopy(data_files)
         self.tokenizer = tokenizer
         self.processor = processor
         self.config = config
@@ -130,7 +88,7 @@ class RLHFDataset(Dataset):
     def _read_files_and_tokenize(self):
         dataframes = []
         for parquet_file in self.data_files:
-            # read parquet files and cache
+
             dataframe = datasets.load_dataset("parquet", data_files=parquet_file)["train"]
             dataframes.append(dataframe)
         self.dataframe: datasets.Dataset = datasets.concatenate_datasets(dataframes)
@@ -140,7 +98,7 @@ class RLHFDataset(Dataset):
         self.dataframe = self.maybe_filter_out_long_prompts(self.dataframe)
 
     def maybe_filter_out_long_prompts(self, dataframe: datasets.Dataset = None):
-        # filter out too long prompts
+
         if self.filter_overlong_prompts:
             tokenizer = self.tokenizer
             processor = self.processor
@@ -177,9 +135,9 @@ class RLHFDataset(Dataset):
 
     def resume_dataset_state(self):
         self.serialize_dataset = not hasattr(self, "original_data_files")
-        # resume dataframe if not it's serialized in data.pt
+
         if not self.serialize_dataset:
-            self._download(use_origin_parquet=True)  # download and resume from original parquet files
+            self._download(use_origin_parquet=True)
             self._read_files_and_tokenize()
         else:
             print(r"old dataloader ckpt file is used, please train from scratch for better ckpt performance")
@@ -209,9 +167,6 @@ class RLHFDataset(Dataset):
         return messages
 
     def __getitem__(self, item):
-        """
-        Note that we also return the raw_input_ids so that it can be combined with other chat template
-        """
         row_dict: dict = self.dataframe[item]
         messages = self._build_messages(row_dict)
         model_inputs = {}
@@ -226,16 +181,12 @@ class RLHFDataset(Dataset):
             if self.image_key in row_dict and row_dict.get(self.image_key, None) is not None:
                 images = [process_image(image) for image in row_dict.pop(self.image_key)]
 
-                # due to the image key is "image" instead of "images" in vllm, we need to use "image" here
-                # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
                 multi_modal_data["image"] = images
 
             videos = None
             if self.video_key in row_dict and row_dict.get(self.video_key, None) is not None:
                 videos = [process_video(video) for video in row_dict.pop(self.video_key)]
 
-                # due to the video key is "video" instead of "videos" in vllm, we need to use "video" here
-                # link: https://github.com/vllm-project/vllm/blob/3c545c0c3b98ee642373a308197d750d0e449403/vllm/multimodal/parse.py#L205
                 multi_modal_data["video"] = [video.numpy() for video in videos]
 
             model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
@@ -246,15 +197,11 @@ class RLHFDataset(Dataset):
             if "second_per_grid_ts" in model_inputs:
                 model_inputs.pop("second_per_grid_ts")
 
-            # There's a trap here, multi_modal_inputs has to be a dict, not BatchFeature
             row_dict["multi_modal_data"] = multi_modal_data
 
-            # We will do batch.union() in the trainer,
-            # so we cannot have "multi_modal_inputs" in row_dict if rollout generates new multi_modal_inputs
             if self.return_multi_modal_inputs:
                 row_dict["multi_modal_inputs"] = dict(model_inputs)
 
-                # second_per_grid_ts isn't used for training, just for mrope
                 row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
 
         else:
@@ -284,7 +231,7 @@ class RLHFDataset(Dataset):
                     second_per_grid_ts=model_inputs.get("second_per_grid_ts"),
                     attention_mask=attention_mask[0],
                 )
-            ]  # (1, 3, seq_len)
+            ]
 
         else:
             position_ids = compute_position_id_with_mask(attention_mask)
@@ -307,15 +254,13 @@ class RLHFDataset(Dataset):
                 raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.max_prompt_length}.")
 
         row_dict["raw_prompt_ids"] = raw_prompt_ids
-        # encode prompts without chat template
+
         if self.return_raw_chat:
             row_dict["raw_prompt"] = messages
 
-        # get prompts with chat template
         if self.return_full_prompt:
-            row_dict["full_prompts"] = raw_prompt  # array of strings
+            row_dict["full_prompts"] = raw_prompt
 
-        # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
         tools_kwargs = row_dict.get("extra_info", {}).get("tools_kwargs", {})
         interaction_kwargs = row_dict.get("extra_info", {}).get("interaction_kwargs", {})

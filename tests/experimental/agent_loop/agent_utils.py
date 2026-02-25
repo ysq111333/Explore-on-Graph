@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import ray
 from omegaconf import DictConfig
@@ -21,9 +9,8 @@ from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
 from verl.workers.fsdp_workers import ActorRolloutRefWorker, AsyncActorRolloutRefWorker
 
-
 def init_agent_loop_manager(config: DictConfig) -> AgentLoopManager | RayWorkerGroup:
-    # =========================== 1. Create hybrid ActorRollout workers ===========================
+
     actor_rollout_cls = (
         AsyncActorRolloutRefWorker if config.actor_rollout_ref.rollout.mode == "async" else ActorRolloutRefWorker
     )
@@ -41,7 +28,6 @@ def init_agent_loop_manager(config: DictConfig) -> AgentLoopManager | RayWorkerG
     resource_pool_manager.create_resource_pool()
     resource_pool_to_cls = {pool: {} for pool in resource_pool_manager.resource_pool_dict.values()}
 
-    # create actor and rollout
     resource_pool = resource_pool_manager.get_resource_pool(Role.ActorRollout)
     actor_rollout_cls = RayClassWithInitArgs(
         cls=role_worker_mapping[Role.ActorRollout], config=config.actor_rollout_ref, role="actor_rollout"
@@ -60,7 +46,6 @@ def init_agent_loop_manager(config: DictConfig) -> AgentLoopManager | RayWorkerG
     if config.actor_rollout_ref.rollout.mode == "sync":
         return actor_rollout_wg
 
-    # =========================== 2. Create AgentLoopManager ===========================
     agent_loop_manager = AgentLoopManager(
         config=config,
         worker_group=actor_rollout_wg,

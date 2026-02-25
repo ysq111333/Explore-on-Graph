@@ -1,16 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import logging
 import os
@@ -33,17 +21,15 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 T = TypeVar("T")
 
-
 class PoolMode(Enum):
     ThreadMode = 1
     ProcessMode = 2
-
 
 @ray.remote(concurrency_groups={"acquire": 1, "release": 10})
 class TokenBucketWorker:
     def __init__(self, rate_limit: int):
         self.rate_limit = rate_limit
-        # this only used for observalability
+
         self.current_count = 0
         self._semaphore = threading.Semaphore(rate_limit)
 
@@ -60,14 +46,12 @@ class TokenBucketWorker:
     def get_current_count(self):
         return self.current_count
 
-
 class ExecutionWorker:
     def __init__(self, enable_global_rate_limit=True, rate_limit=10):
         self.rate_limit_worker = self._init_rate_limit(rate_limit) if enable_global_rate_limit else None
 
     def _init_rate_limit(self, rate_limit):
-        # TODO validation for rate_limit
-        # A Singleton Rate Limitor
+
         return TokenBucketWorker.options(name="rate-limiter", get_if_exists=True).remote(rate_limit)
 
     def ping(self):
@@ -80,9 +64,8 @@ class ExecutionWorker:
             try:
                 return fn(*fn_args, **fn_kwargs)
             except Exception as e:
-                # TODO we should make this available to the tool caller
-                logger.warning(f"Error when executing code: {e}")
 
+                logger.warning(f"Error when executing code: {e}")
 
 def init_execution_pool(
     num_workers: int, enable_global_rate_limit=True, rate_limit=10, mode: PoolMode = PoolMode.ThreadMode
@@ -95,42 +78,13 @@ def init_execution_pool(
         )
     else:
         raise NotImplementedError("Process mode is not implemented yet")
-        # return ray.util.multiprocessing.Pool(processes=num_workers)
-
 
 class SandboxFusionTool(BaseTool):
-    """A tool for executing the code using sanbox fusion image.
-
-    - `to_openai_function_tool_schema`: return the tool schema in OpenAI format.
-    - `create`: create a tool instance for a trajectory.
-    - `execute`: execute the tool.
-    - `calc_reward`: calculate the reward respect to tool state.
-    - `release`: release the tool instance.
-    """
 
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
-        """
-        _tool_schema = OpenAIFunctionToolSchema.model_validate({
-            "type": "function",
-            "function": {
-                "name": "code_interpreter",
-                "description": "A tool for execute code",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "code needs to be execute and grad",
-                        },
-                    },
-                    "required": ["code"],
-                },
-            }
-        })
-        """
         super().__init__(config, tool_schema)
         self._instance_dict = {}
-        # TODO: better documentation for the config
+
         self.num_workers = config.get("num_workers", 10)
         self.rate_limit = config.get("rate_limit", 10)
         self.default_timeout = config.get("default_timeout", 30)
@@ -171,14 +125,14 @@ class SandboxFusionTool(BaseTool):
             code = str(code)
 
         result = await self.execution_pool.execute.remote(self.execute_code, instance_id, code, timeout, language)
-        # sandbox has no score or metrics, use Nones
+
         return result, None, None
 
     def execute_code(self, instance_id, code, timeout=30, language="python"):
         result_status, metadata = _process_single_case(
             0, None, None, self.sandbox_fusion_url, code, timeout, self.memory_limit_mb, language
         )
-        # we should always expect this since we don't have correct answer
+
         if metadata["run_status"] == "Finished":
             actual_output = metadata["stdout"] + metadata["stderr"]
             logger.debug(f"actual_output from sandbox fusion: {actual_output},{instance_id}")

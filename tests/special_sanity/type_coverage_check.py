@@ -1,21 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""Custom type annotation check tool.
-To inspect the type annotation for functions in the entire codebase, please run:
-find verl -type f -name "*.py" | xargs -n 1 python3 tests/special_sanity/type_coverage_check.py --all-lines
---debug --target-file
-"""
+
 
 import argparse
 import ast
@@ -23,13 +6,11 @@ import linecache
 import subprocess
 from pathlib import Path
 
-
 def get_changed_files() -> list[Path]:
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=AM", "origin/main...HEAD"], stdout=subprocess.PIPE, text=True
     )
     return [Path(f) for f in result.stdout.splitlines() if f.endswith(".py")]
-
 
 def get_changed_lines(file_path: Path) -> set[int]:
     result = subprocess.run(
@@ -48,15 +29,13 @@ def get_changed_lines(file_path: Path) -> set[int]:
                     elif part.startswith("+") and "," not in part:
                         lines.add(int(part[1:]))
                 except Exception:
-                    # (vermouth1992) There are many edge cases here because + can be in the changed program
+
                     pass
     return lines
-
 
 CHECK_SUCCESS = 0
 CHECK_WARNING = 1
 CHECK_FAILURE = -1
-
 
 def should_check_type(arg_name: str) -> bool:
     if arg_name in ("self", "cls"):
@@ -64,7 +43,6 @@ def should_check_type(arg_name: str) -> bool:
     if arg_name.startswith("*"):
         return False
     return True
-
 
 def has_type_annotations(node: ast.AST, debug: bool = False) -> int:
     if isinstance(node, ast.FunctionDef):
@@ -80,7 +58,6 @@ def has_type_annotations(node: ast.AST, debug: bool = False) -> int:
                 print(node, [(arg.annotation, arg.arg) for arg in node.args.args if should_check_type(arg.arg)])
             return CHECK_FAILURE
     return CHECK_SUCCESS
-
 
 def check_file(
     file_path: Path, changed_lines: set[int], debug: bool = False
@@ -109,7 +86,6 @@ def check_file(
                     failure_lines.append((file_path, node.lineno, source_line))
 
     return annotated, total, warning_lines, failure_lines
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -174,7 +150,6 @@ def main() -> None:
         if all_warnings or all_failures:
             print("")
         print("✅ Type annotation coverage acceptable.\n")
-
 
 if __name__ == "__main__":
     main()

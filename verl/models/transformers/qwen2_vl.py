@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import inspect
 import os
@@ -39,7 +27,6 @@ try:
 except ImportError:
     flash_attn_varlen_func = None
 
-
 def get_rope_index(
     processor,
     input_ids: torch.Tensor,
@@ -48,11 +35,6 @@ def get_rope_index(
     second_per_grid_ts: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """
-    Gets the position ids for Qwen2-VL, it should be generated before sharding the sequence.
-    The batch dim has been removed and the input_ids should be a 1D tensor representing a single example.
-    https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1546
-    """
     spatial_merge_size = processor.image_processor.merge_size
     tokens_per_second = 2
     image_token_id = processor.tokenizer.convert_tokens_to_ids("<|image_pad|>")
@@ -62,7 +44,7 @@ def get_rope_index(
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
 
-        position_ids = torch.ones(3, input_ids.size(0), dtype=input_ids.dtype, device=input_ids.device)  # (3, seqlen)
+        position_ids = torch.ones(3, input_ids.size(0), dtype=input_ids.dtype, device=input_ids.device)
         image_index, video_index = 0, 0
         input_ids = input_ids[attention_mask == 1]
         image_nums, video_nums = 0, 0
@@ -139,7 +121,6 @@ def get_rope_index(
 
     return position_ids
 
-
 def prepare_fa2_from_position_ids(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, position_ids: torch.Tensor
 ):
@@ -154,9 +135,8 @@ def prepare_fa2_from_position_ids(
             torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32),
         )
     )
-    max_length = cu_seqlens.diff().max()  # use cu_seqlens to infer max_length for qwen2vl mrope
+    max_length = cu_seqlens.diff().max()
     return (query, key, value, indices_q, (cu_seqlens, cu_seqlens), (max_length, max_length))
-
 
 def flash_attention_forward(
     query_states: torch.Tensor,
@@ -171,12 +151,8 @@ def flash_attention_forward(
     deterministic: Optional[bool] = None,
     **kwargs,
 ):
-    """
-    Patches flash attention forward to handle 3D position ids in mrope. (3, batch_size, seq_length)
-    """
     causal = is_causal if not use_top_left_mask else is_causal and query_length != 1
 
-    # Assuming 4D tensors, key_states.shape[1] is the key/value sequence length (source length).
     use_sliding_windows = (
         _flash_supports_window_size and sliding_window is not None and key_states.shape[1] > sliding_window
     )
@@ -191,7 +167,7 @@ def flash_attention_forward(
         batch_size = query_states.size(0)
         query_states, key_states, value_states, _, cu_seq_lens, max_seq_lens = prepare_fa2_from_position_ids(
             query_states, key_states, value_states, position_ids[0]
-        )  # remove channel dimension
+        )
         cu_seqlens_q, cu_seqlens_k = cu_seq_lens
         max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
         attn_output = flash_attn_varlen_func(
@@ -220,23 +196,22 @@ def flash_attention_forward(
             use_top_left_mask=use_top_left_mask,
             deterministic=deterministic,
             **kwargs,
-        )  # do not pass position_ids to old flash_attention_forward
+        )
 
     return attn_output
-
 
 def ulysses_flash_attn_forward(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
-    position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
+    position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, None, None]:
     from transformers.models.qwen2_vl.modeling_qwen2_vl import apply_multimodal_rotary_pos_emb, repeat_kv
 
-    bsz, q_len, _ = hidden_states.size()  # q_len = seq_length / sp_size
-    query_states = self.q_proj(hidden_states)  # (batch_size, seq_length / sp_size, num_heads * head_size)
+    bsz, q_len, _ = hidden_states.size()
+    query_states = self.q_proj(hidden_states)
     key_states = self.k_proj(hidden_states)
     value_states = self.v_proj(hidden_states)
 
@@ -254,12 +229,11 @@ def ulysses_flash_attn_forward(
         query_states = gather_seq_scatter_heads(query_states, seq_dim=2, head_dim=1)
         key_states = gather_seq_scatter_heads(key_states, seq_dim=2, head_dim=1)
         value_states = gather_seq_scatter_heads(value_states, seq_dim=2, head_dim=1)
-        # (batch_size, num_head / sp_size, seq_length, head_size)
-        full_q_len = query_states.size(2)  # full_q_len = seq_length
+
+        full_q_len = query_states.size(2)
     else:
         full_q_len = q_len
 
-    # Because the input can be padded, the absolute sequence length depends on the max position id.
     if position_embeddings is None:
         cos, sin = self.rotary_emb(value_states, position_ids)
     else:
@@ -270,7 +244,6 @@ def ulysses_flash_attn_forward(
     )
     dropout_rate = 0.0 if not self.training else self.attention_dropout
 
-    # Reashape to the expected shape for Flash Attention
     query_states = query_states.transpose(1, 2)
     key_states = key_states.transpose(1, 2)
     value_states = value_states.transpose(1, 2)
@@ -294,8 +267,8 @@ def ulysses_flash_attn_forward(
         sliding_window=sliding_window,
         is_causal=self.is_causal,
         use_top_left_mask=self._flash_attn_uses_top_left_mask,
-        position_ids=position_ids,  # important: pass position ids
-    )  # (batch_size, seq_length, num_head / sp_size, head_size)
+        position_ids=position_ids,
+    )
     if ulysses_sp_size > 1:
         attn_output = gather_heads_scatter_seq(attn_output, head_dim=2, seq_dim=1)
 
@@ -303,12 +276,10 @@ def ulysses_flash_attn_forward(
     attn_output = self.o_proj(attn_output)
     return attn_output, None, None
 
-
 @dataclass
 class Qwen2VLCausalLMOutputForPPO(Qwen2VLCausalLMOutputWithPast):
     log_probs: Optional[torch.FloatTensor] = None
     entropy: Optional[torch.FloatTensor] = None
-
 
 def forward_base_model(
     self: Qwen2VLForConditionalGeneration,
@@ -328,10 +299,6 @@ def forward_base_model(
     rope_deltas: Optional[torch.LongTensor] = None,
     cache_position: Optional[torch.LongTensor] = None,
 ) -> tuple | Qwen2VLCausalLMOutputWithPast:
-    r"""
-    Copy paste Qwen2VL's forward
-    https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/model/qwen2_vl.py
-    ```"""
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     output_hidden_states = (
         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -382,17 +349,17 @@ def forward_base_model(
             attention_mask = attention_mask.to(inputs_embeds.device)
 
     if position_ids is None and (attention_mask is None or attention_mask.ndim == 2):
-        # calculate RoPE index once per generation in the pre-fill stage only
+
         if (cache_position is not None and cache_position[0] == 0) or self.rope_deltas is None:
             position_ids, rope_deltas = self.get_rope_index(input_ids, image_grid_thw, video_grid_thw, attention_mask)
             self.rope_deltas = rope_deltas
-        # then use the prev pre-calculated rope-deltas to get the correct position ids
+
         else:
             batch_size, seq_length, _ = inputs_embeds.shape
             delta = cache_position[0] + self.rope_deltas if cache_position is not None else 0
             position_ids = torch.arange(seq_length, device=inputs_embeds.device)
             position_ids = position_ids.view(1, -1).expand(batch_size, -1)
-            if cache_position is not None:  # otherwise `deltas` is an int `0`
+            if cache_position is not None:
                 delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=0)
             position_ids = position_ids.add(delta)
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
@@ -411,7 +378,6 @@ def forward_base_model(
     )
 
     return outputs
-
 
 def forward_with_torch_backend(
     self: Qwen2VLForConditionalGeneration,
@@ -460,7 +426,6 @@ def forward_with_torch_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_torch_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:
@@ -484,7 +449,6 @@ def forward_with_torch_backend(
         attentions=outputs.attentions,
         rope_deltas=rope_deltas,
     )
-
 
 def forward_with_triton_backend(
     self: Qwen2VLForConditionalGeneration,
@@ -533,7 +497,6 @@ def forward_with_triton_backend(
     if not return_dict:
         raise NotImplementedError("forward_with_triton_backend has to return_dict")
 
-    # Loss calculations
     if labels is not None:
         rolled_labels = torch.roll(labels, shifts=-1, dims=-1)
     elif input_ids is not None:

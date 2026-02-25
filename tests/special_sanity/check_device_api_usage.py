@@ -1,54 +1,33 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-"""
-This CI test is used for checking whether device api usage is irregular, suggest using api in `verl/utils/device.py`.
-Search targets include .py files in verl/recipe and verl/verl.
-Some files that must contain ".cuda", "cuda" or "nccl" keyword is pre-defined in whitelist below.
-"""
 
 import os
 from argparse import ArgumentParser
 from pathlib import Path
 
-# directory or file path must contain keyword ".cuda" or "cuda"
 CUDA_KEYWORD_CHECK_WHITELIST = [
     "verl/utils/device.py",
-    "recipe/prime/prime_ray_trainer.py",  # appear in default device_name
-    "recipe/spin/spin_trainer.py",  # appear in default device_name
-    "recipe/sppo/sppo_ray_trainer.py",  # appear in default device_name
-    "recipe/one_step_off_policy/ray_trainer.py",  # appear in default device_name
-    "verl/utils/profiler/nvtx_profile.py",  # appear in NsightSystemsProfiler
-    "verl/utils/kernel/linear_cross_entropy.py",  # appear in nvidia nvtx
-    "verl/utils/rendezvous/ray_backend.py",  # appear in cupy importance
-    "verl/single_controller/ray/base.py",  # appear in default device_name
-    "verl/trainer/ppo/ray_trainer.py",  # appear in default device_name
-    "verl/utils/reward_score/sandbox_fusion/utils.py",  # appear in sandbox language type
-    "verl/workers/reward_model/megatron/reward_model.py",  # appear in default device_name
+    "recipe/prime/prime_ray_trainer.py",
+    "recipe/spin/spin_trainer.py",
+    "recipe/sppo/sppo_ray_trainer.py",
+    "recipe/one_step_off_policy/ray_trainer.py",
+    "verl/utils/profiler/nvtx_profile.py",
+    "verl/utils/kernel/linear_cross_entropy.py",
+    "verl/utils/rendezvous/ray_backend.py",
+    "verl/single_controller/ray/base.py",
+    "verl/trainer/ppo/ray_trainer.py",
+    "verl/utils/reward_score/sandbox_fusion/utils.py",
+    "verl/workers/reward_model/megatron/reward_model.py",
     "verl/workers/engine/fsdp/engine_impl.py",
 ]
 
-# directory or file path must contain keyword "nccl"
 NCCL_KEYWORD_CHECK_WHITELIST = [
     "verl/utils/device.py",
-    "verl/third_party/sglang/parallel_state.py",  # appear in default backend
+    "verl/third_party/sglang/parallel_state.py",
 ]
 
 SEARCH_WHITELIST = CUDA_KEYWORD_CHECK_WHITELIST + NCCL_KEYWORD_CHECK_WHITELIST
 
 SEARCH_KEYWORDS = [".cuda", '"cuda"', '"nccl"']
-
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -60,11 +39,10 @@ if __name__ == "__main__":
     for path in pathlist:
         path_in_str = str(path.absolute())
 
-        # judge whether current path is in pre-defined search whitelist or not.
         path_in_whitelist = False
 
         for sw in SEARCH_WHITELIST:
-            # for easy debugging in non-linux system
+
             sw = sw.replace("/", os.sep)
             if sw in path_in_str:
                 print(f"[SKIP] File {path_in_str} is in device api usage check whitelist, checking is skipped.")

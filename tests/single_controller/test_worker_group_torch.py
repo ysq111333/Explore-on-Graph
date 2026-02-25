@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 
@@ -23,7 +11,6 @@ import torch.distributed
 
 from verl.single_controller.base.worker import Worker
 from verl.single_controller.ray.base import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
-
 
 @ray.remote
 class TestAllGatherActor(Worker):
@@ -44,7 +31,6 @@ class TestAllGatherActor(Worker):
         torch.distributed.all_gather_into_tensor(output, self.tensor, async_op=False)
         return output
 
-
 @ray.remote
 class TestAllGatherActorV2(Worker):
     def __init__(self, size) -> None:
@@ -63,14 +49,9 @@ class TestAllGatherActorV2(Worker):
         torch.distributed.all_gather_into_tensor(output, self.tensor, async_op=False)
         return output
 
-
 def test_all_gather_torch():
-    """
-    In this test, we instantiate 4 GPUs in a group and test the all_gather
-    """
     ray.init()
 
-    # create 4 workers, each hold a GPU
     resource_pool = RayResourcePool([4], use_gpu=True)
     class_with_args = RayClassWithInitArgs(cls=TestAllGatherActor, size=2)
 
@@ -87,14 +68,9 @@ def test_all_gather_torch():
 
     ray.shutdown()
 
-
 def test_all_gather_torch_v2():
-    """
-    In this test, we instantiate 4 GPUs in a group and test the all_gather
-    """
     ray.init()
 
-    # create 4 workers, each hold a GPU
     resource_pool = RayResourcePool([4], use_gpu=True)
     class_with_args = RayClassWithInitArgs(cls=TestAllGatherActorV2, size=2)
 

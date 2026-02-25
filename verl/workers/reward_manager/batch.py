@@ -1,16 +1,4 @@
-# Copyright 2025 Individual Contributor: Mert Unsal
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 from collections import defaultdict
 
@@ -19,19 +7,8 @@ import torch
 from verl import DataProto
 from verl.workers.reward_manager import register
 
-
 @register("batch")
 class BatchRewardManager:
-    """
-    A batch reward manager that computes rewards for a batch of data.
-
-    Args:
-        tokenizer (Tokenizer): The tokenizer to use for decoding the responses.
-        num_examine (int): The number of responses to examine.
-        compute_score (callable): The function to compute the rewards.
-        reward_fn_key (str): The key to use for the reward function.
-        reward_kwargs (dict): The keyword arguments to pass to the reward function.
-    """
 
     def __init__(self, tokenizer, num_examine, compute_score, reward_fn_key="data_source", **reward_kwargs):
         self.tokenizer = tokenizer
@@ -70,7 +47,7 @@ class BatchRewardManager:
         return scores
 
     def __call__(self, data: DataProto, return_dict=False):
-        # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
+
         if "rm_scores" in data.batch.keys():
             if return_dict:
                 return {"reward_tensor": data.batch["rm_scores"]}

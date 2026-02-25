@@ -1,20 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Utilities to check if packages are available.
-We assume package availability won't change during runtime.
-"""
+
 
 import importlib
 import importlib.util
@@ -22,7 +6,6 @@ import os
 import warnings
 from functools import cache, wraps
 from typing import Optional
-
 
 @cache
 def is_megatron_core_available():
@@ -32,7 +15,6 @@ def is_megatron_core_available():
         mcore_spec = None
     return mcore_spec is not None
 
-
 @cache
 def is_vllm_available():
     try:
@@ -40,7 +22,6 @@ def is_vllm_available():
     except ModuleNotFoundError:
         vllm_spec = None
     return vllm_spec is not None
-
 
 @cache
 def is_sglang_available():
@@ -50,7 +31,6 @@ def is_sglang_available():
         sglang_spec = None
     return sglang_spec is not None
 
-
 @cache
 def is_nvtx_available():
     try:
@@ -59,7 +39,6 @@ def is_nvtx_available():
         nvtx_spec = None
     return nvtx_spec is not None
 
-
 @cache
 def is_trl_available():
     try:
@@ -67,7 +46,6 @@ def is_trl_available():
     except ModuleNotFoundError:
         trl_spec = None
     return trl_spec is not None
-
 
 def import_external_libs(external_libs=None):
     if external_libs is None:
@@ -79,22 +57,17 @@ def import_external_libs(external_libs=None):
     for external_lib in external_libs:
         importlib.import_module(external_lib)
 
-
 def load_extern_type(file_path: Optional[str], type_name: Optional[str]) -> type:
-    """Load a external data type based on the file path and type name"""
     if not file_path:
         return None
 
     if file_path.startswith("pkg://"):
-        # pkg://verl.utils.dataset.rl_dataset
-        # pkg://verl/utils/dataset/rl_dataset
+
         module_name = file_path[6:].replace("/", ".")
         module = importlib.import_module(module_name)
 
     else:
-        # file://verl/utils/dataset/rl_dataset
-        # file:///path/to/verl/utils/dataset/rl_dataset.py
-        # or without file:// prefix
+
         if file_path.startswith("file://"):
             file_path = file_path[7:]
 
@@ -113,16 +86,12 @@ def load_extern_type(file_path: Optional[str], type_name: Optional[str]) -> type
 
     return getattr(module, type_name)
 
-
 def _get_qualified_name(func):
-    """Get full qualified name including module and class (if any)."""
     module = func.__module__
     qualname = func.__qualname__
     return f"{module}.{qualname}"
 
-
 def deprecated(replacement: str = ""):
-    """Decorator to mark functions or classes as deprecated."""
 
     def decorator(obj):
         qualified_name = _get_qualified_name(obj)

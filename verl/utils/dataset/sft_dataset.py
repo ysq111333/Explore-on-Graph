@@ -1,22 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-SFT dataset
-- We assume user pass a single parquet file.
-- We load all the data into the memory.
-Each parquet file contains
-"""
+
 
 import pandas as pd
 import torch
@@ -28,14 +10,7 @@ from verl.utils import hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
 
-
 class SFTDataset(Dataset):
-    """
-    This is an in-memory SFTDataset
-
-    Arguments:
-        config (OmegaConf): the data config
-    """
 
     def __init__(self, parquet_files: str | ListConfig, tokenizer, config):
         prompt_key = config.get("prompt_key", "prompt")
@@ -83,17 +58,15 @@ class SFTDataset(Dataset):
 
         dataframes = []
         for parquet_file in self.parquet_files:
-            # read parquet files and cache
+
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
         self.dataframe = pd.concat(dataframes)
         self.prompts = self.dataframe[self.prompt_key]
         for key in self.prompt_dict_keys:
-            # type(x): pandas.core.series.Series
-            # type(x[0]): numpy.ndarray
-            # type(x[0][0]): dict
+
             try:
-                self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis=1)  # noqa: B023
+                self.prompts = self.prompts.apply(lambda x: series_to_item(x)[key], axis=1)
             except Exception:
                 print(f"self.prompts={self.prompts}")
                 raise
@@ -103,7 +76,7 @@ class SFTDataset(Dataset):
         self.responses = self.dataframe[self.response_key]
         for key in self.response_dict_keys:
             try:
-                self.responses = self.responses.apply(lambda x: series_to_item(x)[key], axis=1)  # noqa: B023
+                self.responses = self.responses.apply(lambda x: series_to_item(x)[key], axis=1)
             except Exception:
                 print(f"self.responses={self.responses}")
                 raise
@@ -120,14 +93,11 @@ class SFTDataset(Dataset):
         prompt = self.prompts[item]
         response = self.responses[item]
 
-        # apply chat template
         prompt_chat = [{"role": "user", "content": prompt}]
 
-        # string
         prompt_chat_str = tokenizer.apply_chat_template(prompt_chat, add_generation_prompt=True, tokenize=False)
         response_chat_str = response + tokenizer.eos_token
 
-        # tokenize
         prompt_ids_output = tokenizer(prompt_chat_str, return_tensors="pt", add_special_tokens=False)
         prompt_ids = prompt_ids_output["input_ids"][0]
         prompt_attention_mask = prompt_ids_output["attention_mask"][0]
@@ -142,7 +112,6 @@ class SFTDataset(Dataset):
         input_ids = torch.cat((prompt_ids, response_ids), dim=-1)
         attention_mask = torch.cat((prompt_attention_mask, response_attention_mask), dim=-1)
 
-        # padding to max length
         sequence_length = input_ids.shape[0]
         if sequence_length < self.max_length:
             padded_input_ids = (
@@ -155,7 +124,7 @@ class SFTDataset(Dataset):
             attention_mask = torch.cat((attention_mask, padded_attention_mask))
         elif sequence_length > self.max_length:
             if self.truncation == "left":
-                # actually, left truncation may not be reasonable
+
                 input_ids = input_ids[-self.max_length :]
                 attention_mask = attention_mask[-self.max_length :]
             elif self.truncation == "right":
@@ -170,9 +139,9 @@ class SFTDataset(Dataset):
 
         loss_mask = attention_mask.clone()
         if prompt_length > 1:
-            # mask out prompt for SFT.
+
             loss_mask[: min(prompt_length, loss_mask.size(0)) - 1] = 0
-        # mask out the last token in response
+
         loss_mask[min(prompt_length + response_length, loss_mask.size(0)) - 1] = 0
 
         return {

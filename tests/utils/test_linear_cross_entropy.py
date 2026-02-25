@@ -1,33 +1,4 @@
-#
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
 
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 import os
 
@@ -44,22 +15,20 @@ fused_linear_for_ppo.compile(dynamic=True)
 
 MAX_TEST_CASES = os.environ.get("MAX_TEST_CASES", 5)
 
-
 def run_torch_entropy(
     hidden: torch.Tensor, weight: torch.Tensor, labels: torch.Tensor, temperature: float, reduction="none"
 ) -> list[torch.Tensor]:
     hidden = hidden.squeeze(0).to(torch.float32)
     weight = weight.transpose(0, 1).to(torch.float32)
-    logits = torch.matmul(hidden, weight)  # [num_tokens, vocab_size]
+    logits = torch.matmul(hidden, weight)
     logits /= temperature
-    pd = torch.nn.functional.softmax(logits, dim=-1)  # [num_tokens, vocab_size]
-    entropy_a = torch.logsumexp(logits, dim=-1)  # [num_tokens]
-    entropy_b = torch.sum(pd * logits, dim=-1)  # [num_tokens]
+    pd = torch.nn.functional.softmax(logits, dim=-1)
+    entropy_a = torch.logsumexp(logits, dim=-1)
+    entropy_b = torch.sum(pd * logits, dim=-1)
     entropy = entropy_a - entropy_b
-    logprobs = torch.nn.functional.cross_entropy(logits, labels.squeeze(0), reduction=reduction)  # [num_tokens]
+    logprobs = torch.nn.functional.cross_entropy(logits, labels.squeeze(0), reduction=reduction)
     logprobs = torch.neg(logprobs)
     return logprobs, entropy
-
 
 def run_verl_original_entropy(
     hidden: torch.Tensor,
@@ -69,16 +38,14 @@ def run_verl_original_entropy(
 ) -> list[torch.Tensor]:
     hidden = hidden.squeeze(0).to(torch.float32)
     weight = weight.transpose(0, 1).to(torch.float32)
-    logits = torch.matmul(hidden, weight)  # [num_tokens, vocab_size]
+    logits = torch.matmul(hidden, weight)
     logits /= temperature
-    # compute entropy
-    entropy = compute_entropy_from_logits(logits)  # ((total_nnz / sp) + pad)
-    # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
+
+    entropy = compute_entropy_from_logits(logits)
+
     logprobs = logprobs_from_logits(logits=logits, labels=labels, inplace_backward=False)
     return logprobs, entropy
 
-
-# To be tested
 def run_verl_torch_fused_entropy(
     hidden: torch.Tensor,
     weight: torch.Tensor,
@@ -94,7 +61,6 @@ def run_verl_torch_fused_entropy(
         temperature=temperature,
     )
     return logprobs.squeeze(0), entropy.squeeze(0)
-
 
 class TestLinearCrossEntropy:
     def __init__(self, test_case_idx: int, temperature: float = 1.5) -> None:
@@ -222,7 +188,6 @@ class TestLinearCrossEntropy:
             torch.testing.assert_close(verl_fused_logprobs, kernel_logprobs, atol=1e-3, rtol=2e-4)
             torch.testing.assert_close(verl_fused_entropy, kernel_entropy, atol=5e-3, rtol=5e-4)
 
-            # backward
             g_entropy, g_logprobs = self.generate_backward_inputs()
 
             start_event.record()
@@ -274,7 +239,6 @@ class TestLinearCrossEntropy:
             torch.testing.assert_close(d_verl_fused_hidden, d_kernel_hidden, atol=2e-2, rtol=4e-2)
             torch.testing.assert_close(d_verl_fused_weight, d_kernel_weight, atol=2e-2, rtol=4e-2)
 
-        # remove first latency
         torch_forward_latency = torch_forward_latency[1:]
         torch_backward_latency = torch_backward_latency[1:]
         verl_forward_latency = verl_forward_latency[1:]
@@ -347,9 +311,7 @@ class TestLinearCrossEntropy:
         self.check_storage("VeRL Torch Fused", run_verl_torch_fused_entropy)
         self.check_storage("Kernel", linear_cross_entropy)
 
-
 if __name__ == "__main__":
-    # torch.cuda.memory._record_memory_history()
 
     for test_case_idx in range(MAX_TEST_CASES):
         print(f"[INFO] Running test case {test_case_idx}")
@@ -358,4 +320,3 @@ if __name__ == "__main__":
         test.verify_correctness()
         test.check_storage_all()
 
-    # torch.cuda.memory._dump_snapshot("test_linear_cross_entropy.pkl")

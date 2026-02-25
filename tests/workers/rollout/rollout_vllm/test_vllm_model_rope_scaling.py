@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import gc
 
@@ -25,11 +13,7 @@ from verl.utils.distributed import initialize_global_process_group
 from verl.utils.model import compute_position_id_with_mask
 from verl.workers.rollout.vllm_rollout.vllm_rollout_spmd import vLLMRollout
 
-
 def test_vllm_rollout_with_yarn_position_embeddings():
-    """
-    Test the vLLM rollout with yarn position embeddings.
-    """
 
     local_rank, rank, world_size = initialize_global_process_group()
     config = OmegaConf.create(
@@ -65,7 +49,6 @@ def test_vllm_rollout_with_yarn_position_embeddings():
     tokenizer.pad_token = tokenizer.eos_token
     model_hf_config = AutoConfig.from_pretrained(config.model_path)
 
-    # do_sample=False for temperate=0 deterministic
     input_dataproto = prepare_input_dataproto(tokenizer, config, validate=True, do_sample=False)
 
     vllm_rollout = vLLMRollout(
@@ -74,7 +57,7 @@ def test_vllm_rollout_with_yarn_position_embeddings():
         tokenizer=tokenizer,
         model_hf_config=model_hf_config,
     )
-    # rollout
+
     rollout_response = vllm_rollout.generate_sequences(
         prompts=input_dataproto,
     )
@@ -94,11 +77,10 @@ def test_vllm_rollout_with_yarn_position_embeddings():
     dist.barrier()
     torch.distributed.destroy_process_group()
 
-
 def prepare_input_dataproto(tokenizer, config, validate, do_sample=False):
     base_phrase = "Roses are red, sky is blue. " * 4096
     preencode_prompts = [
-        # 32810 tokens > 32768 tokens
+
         [{"role": "user", "content": base_phrase + "Who won the Champions League in 2019?"}],
         [{"role": "user", "content": base_phrase + "The founder of Apple is"}],
         [{"role": "user", "content": base_phrase + "What's your name"}],
@@ -125,7 +107,6 @@ def prepare_input_dataproto(tokenizer, config, validate, do_sample=False):
         },
     )
     return input_dataproto
-
 
 if __name__ == "__main__":
     test_vllm_rollout_with_yarn_position_embeddings()

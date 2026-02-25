@@ -1,30 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-The vllm_rollout that can be applied in different backend
-When working with FSDP:
-- Use DTensor weight loader (recommended) or HF weight loader
-- Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
-When working with Megatron:
-- Use Megatron weight loader
-- During training, only the current pp stage holds the parameters
-- Before inference, broadcast the parameters of the current pp rank
-  to all other pp ranks (all pp ranks holds all the parameters)
-- Bind the parameters to the inference engine
-- Do inference in tp. pp is treated as additional dp
-- After inference, all the parameters that doesn't belong to this pp rank is freed.
-"""
+
 
 import logging
 import os
@@ -58,33 +32,14 @@ from verl.workers.rollout.base import BaseRollout
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-# TODO
-# 1. support pp in vllm
-# 2. passing tokenizer is not necessary? no encoding/decoding is happending here
-# 3. simplify init logics
-
-
-# NOTE(sgm): add for verl. We can optimize it by making the dataloader yield List[int] without padding.
 def _pre_process_inputs(pad_token_id, prompt_token_ids: torch.Tensor) -> list[int]:
-    # remove the left padding in the prompt token_id
-    # pad_token_id = self.llm_engine.tokenizer.pad_token_id if self.llm_engine.tokenizer.pad_token_id
-    # is not None else self.llm_engine.tokenizer.eos_token_id
+
     non_pad_index = torch.nonzero(prompt_token_ids != pad_token_id, as_tuple=False)[0][0]
     token_ids = prompt_token_ids[non_pad_index:].tolist()
     return token_ids
 
-
 class vLLMRollout(BaseRollout):
     def __init__(self, model_path: str, config: DictConfig, tokenizer, model_hf_config, **kwargs):
-        """A vLLM rollout. It requires the module is supported by the vllm.
-
-        Args:
-            module: module here follows huggingface APIs
-            config: DictConfig
-            tokenizer: the task/model tokenizer
-            model_hf_config: the huggingface config to initiallize the generating model in vllm
-            **kwargs: train_tp, for Megatron Backend to initialize hybrid engine (zero redundancy) process group
-        """
         super().__init__()
         self.config = config
 
@@ -95,12 +50,13 @@ class vLLMRollout(BaseRollout):
         max_num_batched_tokens = self.config.get("max_num_batched_tokens", 8192)
 
         if kwargs.get("train_tp") is not None:
-            # deployed with megatron
+
             import os
 
             os.environ["CUDA_TIMER_STREAM_KAFKA_ENABLE"] = "0"
             os.environ["MEGATRON_IMPORT_TIMERS"] = "0"
             vllm_ps.initialize_model_parallel(tensor_model_parallel_size=tensor_parallel_size)
+        
 
         rope_scaling_config = getattr(model_hf_config, "rope_scaling", None)
         if not rope_scaling_config:
@@ -121,9 +77,7 @@ class vLLMRollout(BaseRollout):
                 "model context length should be greater than total sequence length"
             )
         else:
-            # handle type where there's a length extend factor
-            # see https://qwen.readthedocs.io/en/latest/deployment/vllm.html#extended-context-support
-            # for using yarn as an example
+
             rope_scaling_factor = rope_scaling_config.get("factor", 1.0)
 
             assert (
@@ -134,6 +88,8 @@ class vLLMRollout(BaseRollout):
                 + f"got rope_scaling_factor={rope_scaling_factor} and "
                 + f"max_position_embeddings={model_hf_config.max_position_embeddings}"
             )
+
+        
 
         max_model_len = int(config.max_model_len or config.prompt_length + config.response_length)
 
@@ -148,18 +104,15 @@ class vLLMRollout(BaseRollout):
 
         lora_kwargs = kwargs.pop("lora_kwargs", {})
         self.lora_kwargs = lora_kwargs
-        # copy it to avoid secretly modifying the engine config
+
         engine_kwargs = (
             {}
             if "engine_kwargs" not in config or "vllm" not in config.engine_kwargs
             else OmegaConf.to_container(deepcopy(config.engine_kwargs.vllm))
         )
-        # For each vLLM engine parameter,
-        # - `None` means not setting it, so we pop it, and leave it to vLLM default value
-        #    (which can vary across different vLLM versions);
-        # - Otherwise it's the desired value we want to explicitly set.
+
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
-        if config.get("limit_images", None):  # support for multi-image data
+        if config.get("limit_images", None):
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
 
         self.inference_engine = LLM(
@@ -184,23 +137,24 @@ class vLLMRollout(BaseRollout):
             **engine_kwargs,
         )
 
-        # Offload vllm model to reduce peak memory usage
         if config.free_cache_engine:
             self.inference_engine.sleep(level=1)
 
+        
+        
+
         kwargs = dict(
             n=1,
-            logprobs=0,  # can be set to 0 and let actor to recompute
+            logprobs=0,
             max_tokens=config.response_length,
         )
 
         kwargs["detokenize"] = False
 
-        # supporting adding any sampling params from the config file
         for k in config.keys():
             if hasattr(SamplingParams(), str(k)) and k != "seed":
                 kwargs[k] = config.get(k)
-        kwargs["n"] = 1  # already repeat in ray_trainer
+        kwargs["n"] = 1
         print(f"kwargs: {kwargs}")
         self.sampling_params = SamplingParams(**kwargs)
 
@@ -208,7 +162,7 @@ class vLLMRollout(BaseRollout):
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
-        # update sampling params
+
         old_sampling_params_args = {}
         if kwargs:
             for key, value in kwargs.items():
@@ -217,43 +171,25 @@ class vLLMRollout(BaseRollout):
                     old_sampling_params_args[key] = old_value
                     setattr(self.sampling_params, key, value)
         yield
-        # roll back to previous sampling params
-        # if len(old_sampling_params_args):
+
         for key, value in old_sampling_params_args.items():
             setattr(self.sampling_params, key, value)
 
     @GPUMemoryLogger(role="vllm rollout spmd", logger=logger)
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto, **kwargs) -> DataProto:
-        """Generate sequences for a batch of prompts.
+        
 
-        Args:
-            batch (DataProto): Input batch.
+        idx = prompts.batch["input_ids"]
 
-        Returns:
-            DataProto: Output batch.
-            - prompts: [bsz, prompt_length], prompt token ids from dataset.
-            - responses: [bsz, response_length], output token ids include response tokens
-              from LLM generation and observation tokens from tool_calls.
-            - response_mask: [bsz, response_length], 1 for LLM generated tokens, 0 for observation/padding tokens.
-            - input_ids: [bsz, prompt_length + response_length], whole sequence token ids, including prompt tokens
-              and response tokens.
-            - attention_mask: [bsz, prompt_length + response_length], 0 for padding tokens, 1 for other tokens.
-            - position_ids: [bsz, prompt_length + response_length], incremental position ids.
-
-            For multi-turn conversations:
-            responses:     |<- LLM generation ->|<- tool_calls ->|<- LLM generation ->|<- padding ->|
-            response_mask: | 1, 1, 1, ..., 1, 1 | 0, 0, .., 0, 0 | 1, 1, 1, ..., 1, 1 | 0, 0, ..., 0|
-        """
-        idx = prompts.batch["input_ids"]  # (bs, prompt_length)
-        # left-padded attention_mask
         attention_mask = prompts.batch["attention_mask"]
         position_ids = prompts.batch["position_ids"]
 
-        # used to construct attention_mask
         eos_token_id = prompts.meta_info["eos_token_id"]
 
         batch_size = idx.size(0)
+       
+       
 
         non_tensor_batch = prompts.non_tensor_batch
         if "raw_prompt_ids" not in non_tensor_batch:
@@ -275,8 +211,9 @@ class vLLMRollout(BaseRollout):
                 {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
             ]
 
-        # ensure the type of `prompt_token_ids` passed to vllm is list[int]
-        # https://github.com/volcengine/verl/pull/772
+        
+        
+
         for input_data in vllm_inputs:
             if isinstance(input_data["prompt_token_ids"], np.ndarray):
                 input_data["prompt_token_ids"] = input_data["prompt_token_ids"].tolist()
@@ -294,15 +231,15 @@ class vLLMRollout(BaseRollout):
                 "top_k": -1,
                 "min_p": 0.0,
                 "temperature": 0,
-                "n": 1,  # if greedy, only 1 response
+                "n": 1,
             }
         elif is_validate:
-            # TODO: try **
+
             kwargs = {
                 "top_k": self.config.val_kwargs.top_k,
                 "top_p": self.config.val_kwargs.top_p,
                 "temperature": self.config.val_kwargs.temperature,
-                "n": 1,  # if validate, already repeat in ray_trainer
+                "n": 1,
             }
 
         lora_requests = None
@@ -313,18 +250,15 @@ class vLLMRollout(BaseRollout):
                 lora_requests = [
                     LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")
                 ] * batch_size
+        
 
-        # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
             outputs = self.inference_engine.generate(
-                prompts=vllm_inputs,  # because we have already convert it to prompt token id
+                prompts=vllm_inputs,
                 sampling_params=self.sampling_params,
                 lora_request=lora_requests,
                 use_tqdm=False,
             )
-
-            # TODO(sgm): disable logprob when recompute_log_prob is enable
-            # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
 
             response = []
             rollout_log_probs = []
@@ -350,41 +284,37 @@ class vLLMRollout(BaseRollout):
             seq = torch.cat([idx, response], dim=-1)
 
         response_length = response.size(1)
+
         delta_position_id = torch.arange(1, response_length + 1, device=position_ids.device)
         delta_position_id = delta_position_id.unsqueeze(0).expand(batch_size, -1)
-        if position_ids.dim() == 3:  # qwen2vl mrope
+        if position_ids.dim() == 3:
             delta_position_id = delta_position_id.view(batch_size, 1, -1).expand(batch_size, 3, -1)
 
-        # TODO(sgm): fix position_ids on right_pad
-        # prompt: left pad + response: right pad
-        # attention_mask: [0,0,0,0,1,1,1,1, | 1,1,1,0,0,0,0,0]
-        # position_ids:   [0,0,0,0,0,1,2,3, | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
+        
+
         response_attention_mask = get_response_mask(
             response_id=response, eos_token=eos_token_id, dtype=attention_mask.dtype
         )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
-        # all the tp ranks should contain the same data here. data in all ranks are valid
         batch = TensorDict(
             {
                 "prompts": idx,
                 "responses": response,
-                "input_ids": seq,  # here input_ids become the whole sentences
+                "input_ids": seq,
                 "attention_mask": attention_mask,
                 "position_ids": position_ids,
             },
             batch_size=batch_size,
         )
         if self.config.calculate_log_probs:
-            # we will recompute old log prob with actor
+
             batch["rollout_log_probs"] = rollout_log_probs
 
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
-
-# https://github.com/vllm-project/vllm/issues/13175
 def _monkey_patch_compute_logits(model, vocab_size: int):
     original_compute_logits = model.compute_logits
 
@@ -399,16 +329,11 @@ def _monkey_patch_compute_logits(model, vocab_size: int):
 
     model.compute_logits = MethodType(compute_logits, model)
 
-
 class vLLMAsyncRollout:
-    """vLLMAsyncRollout is a thin wrapper of WorkerWrapperBase,
-    which is engine in single worker process.
-    """
 
     def __init__(self, model_path: str, config: DictConfig, tokenizer, model_hf_config, **kwargs):
         self.tokenizer = tokenizer
 
-        # Engine is deferred to be initialized in init_worker
         self.config = config
         self.inference_engine: WorkerWrapperBase = None
         self.sharding_manager = None
@@ -418,11 +343,9 @@ class vLLMAsyncRollout:
     def _init_zeromq(self) -> str:
         tensor_parallel_size = self.config.tensor_model_parallel_size
 
-        # single node: ipc, multi nodes: tcp
         local_world_size = int(os.environ["RAY_LOCAL_WORLD_SIZE"])
         socket_type = "ipc" if tensor_parallel_size <= local_world_size else "tcp"
 
-        # File lock to prevent multiple workers listen to same port
         with FileLock("/tmp/verl_vllm_zmq.lock"):
             if socket_type == "ipc":
                 pid = os.getpid()
@@ -457,7 +380,6 @@ class vLLMAsyncRollout:
         return self.address
 
     def init_worker(self, all_kwargs: list[dict[str, Any]]):
-        """Initialize worker engine."""
         all_kwargs[0]["rank"] = int(os.environ["RANK"])
         all_kwargs[0]["local_rank"] = 0
 
@@ -468,24 +390,21 @@ class vLLMAsyncRollout:
     def load_model(self, *args, **kwargs):
         self.inference_engine.load_model(*args, **kwargs)
 
-        # inference engine is initialized now, update sharding manager
         self.sharding_manager.inference_engine = self.inference_engine
         self.sharding_manager.model_runner = self.inference_engine.worker.model_runner
 
         _monkey_patch_compute_logits(self.inference_engine.worker.model_runner.model, len(self.tokenizer))
 
     def sleep(self, *args, **kwargs):
-        """Offload model weights and discard kv cache."""
         if self.is_sleep:
             return
         self.sharding_manager.__exit__(None, None, None)
         self.is_sleep = True
 
     def wake_up(self, *args, **kwargs):
-        """Load model weights and build kv cache."""
         if not self.is_sleep:
             return
-        self.sharding_manager.__enter__()  # pylint: disable=C2801
+        self.sharding_manager.__enter__()
         self.is_sleep = False
 
     def execute_method(self, method: str | bytes, *args, **kwargs):

@@ -1,22 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""Copied from https://github.com/dariush-bahrami/character-tokenizer/blob/master/charactertokenizer/core.py
 
-CharacterTokenzier for Hugging Face Transformers.
-
-This is heavily inspired from CanineTokenizer in transformers package.
-"""
 
 import json
 import os
@@ -25,27 +7,8 @@ from typing import Optional, Sequence
 
 from transformers.tokenization_utils import AddedToken, PreTrainedTokenizer
 
-
 class CharTokenizer(PreTrainedTokenizer):
     def __init__(self, characters: Sequence[str], model_max_length: int, chat_template, **kwargs):
-        """Character tokenizer for Hugging Face transformers.
-
-        Args:
-            characters (Sequence[str]): List of desired characters. Any character which
-                is not included in this list will be replaced by a special token called
-                [UNK] with id=6. Following are list of all of the special tokens with
-                their corresponding ids:
-                    "[CLS]": 0
-                    "[SEP]": 1
-                    "[BOS]": 2
-                    "[MASK]": 3
-                    "[PAD]": 4
-                    "[RESERVED]": 5
-                    "[UNK]": 6
-                an id (starting at 7) will be assigned to each character.
-
-            model_max_length (int): Model maximum sequence length.
-        """
         eos_token_str = "E"
         sep_token_str = "S"
         pad_token_str = "P"

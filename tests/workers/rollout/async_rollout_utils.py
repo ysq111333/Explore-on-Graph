@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import ray
 from omegaconf import DictConfig
@@ -21,9 +9,8 @@ from verl.trainer.ppo.ray_trainer import ResourcePoolManager, Role
 from verl.workers.fsdp_workers import AsyncActorRolloutRefWorker
 from verl.workers.rollout.async_server import AsyncLLMServerManager
 
-
 def init_async_rollout_manager(config: DictConfig) -> AsyncLLMServerManager:
-    # =========================== 1. Create hybrid ActorRollout workers ===========================
+
     role_worker_mapping = {
         Role.ActorRollout: ray.remote(AsyncActorRolloutRefWorker),
     }
@@ -38,7 +25,6 @@ def init_async_rollout_manager(config: DictConfig) -> AsyncLLMServerManager:
     resource_pool_manager.create_resource_pool()
     resource_pool_to_cls = {pool: {} for pool in resource_pool_manager.resource_pool_dict.values()}
 
-    # create actor and rollout
     resource_pool = resource_pool_manager.get_resource_pool(Role.ActorRollout)
     actor_rollout_cls = RayClassWithInitArgs(
         cls=role_worker_mapping[Role.ActorRollout], config=config.actor_rollout_ref, role="actor_rollout"
@@ -54,7 +40,6 @@ def init_async_rollout_manager(config: DictConfig) -> AsyncLLMServerManager:
     actor_rollout_wg = all_wg["actor_rollout"]
     actor_rollout_wg.init_model()
 
-    # =========================== 2. Create AsyncLLMServerManager  ===========================
     async_rollout_manager = AsyncLLMServerManager(
         config=config,
         worker_group=actor_rollout_wg,

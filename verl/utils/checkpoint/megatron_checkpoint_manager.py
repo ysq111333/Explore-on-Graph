@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import json
 import logging
@@ -40,64 +28,10 @@ from verl.utils.megatron_utils import (
 
 from .checkpoint_manager import BaseCheckpointManager
 
-# Setup logging
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
 
-
 class MegatronCheckpointManager(BaseCheckpointManager):
-    """
-    Checkpoint manager for Megatron-LM distributed training.
-
-    This class manages the saving and loading of model checkpoints in a Megatron-LM
-    distributed training environment. It handles various aspects of checkpointing
-    including model states, optimizer states, learning rate schedulers, and random
-    number generator states, ensuring compatibility with HuggingFace formats.
-
-    Key features:
-    - Distributed checkpoint saving and loading using Megatron's dist_checkpointing
-    - Support for tensor parallel, pipeline parallel, and data parallel configurations
-    - Automatic handling of model state dictionaries across multiple pipeline stages
-    - Integration with HuggingFace model configurations and tokenizers
-    - Random number generator state management for reproducibility
-    - Support for both synchronous and asynchronous checkpoint operations
-
-    The manager automatically handles:
-    - Directory structure creation based on global steps and process ranks
-    - Model configuration and tokenizer saving in HuggingFace format
-    - Optimizer and scheduler state persistence
-    - CUDA RNG state management for deterministic training
-    - Checkpoint cleanup and retention policies
-
-    Args:
-        model: The Megatron model instance to checkpoint
-        optimizer: The optimizer instance (optional)
-        lr_scheduler: The learning rate scheduler instance (optional)
-
-    Attributes:
-        model: Reference to the Megatron model being checkpointed
-        optimizer: Reference to the optimizer (if provided)
-        lr_scheduler: Reference to the learning rate scheduler (if provided)
-        rank: Current process rank in the distributed setup
-
-    Example:
-        ```python
-        checkpoint_manager = MegatronCheckpointManager(
-            model=megatron_model,
-            optimizer=optimizer,
-            lr_scheduler=scheduler
-        )
-
-        checkpoint_manager.save_checkpoint(
-            local_path="checkpoints/step_1000",
-            global_step=1000
-        )
-
-        checkpoint_manager.load_checkpoint(
-            local_path="checkpoints/step_1000"
-        )
-        ```
-    """
 
     def __init__(
         self,
@@ -149,7 +83,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         self.weight_saver = get_weight_saver(self.arch)
 
     def get_rng_state(self, use_dist_ckpt: bool = True, data_parallel_random_init: bool = False):
-        """collect rng state across data parallel ranks"""
         rng_state = {
             "random_rng_state": random.getstate(),
             "np_rng_state": np.random.get_state(),
@@ -194,8 +127,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         return_base_dir=True,
         basename="model.pt",
     ):
-        """Determine the directory name for this rank's checkpoint."""
-        # Use both the tensor and pipeline MP rank.
+
         if pipeline_parallel is None:
             pipeline_parallel = mpu.get_pipeline_model_parallel_world_size() > 1
         if tensor_rank is None:
@@ -209,11 +141,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         if expert_rank is None:
             expert_rank = mpu.get_expert_model_parallel_rank()
 
-        # Use both the tensor and pipeline MP rank. If using the distributed
-        # optimizer, then the optimizer's path must additionally include the
-        # data parallel rank.
-
-        # due to the fact that models are identical across cp ranks, cp rank is not used in the checkpoint path
         if not pipeline_parallel:
             common_path = os.path.join(checkpoints_path, f"mp_rank_{tensor_rank:02d}")
         else:
@@ -229,12 +156,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         return os.path.join(common_path, basename)
 
     def generate_state_dict(self):
-        # For save dist checkpointing
+
         state_dict = {}
 
-        # All ranks Save Model to reduce memory pressure
         if self.should_save_model or self.should_load_model:
-            # Get sharded state dict, notice that state_dict will collect among dp groups, causing memory pressure
+
             for vpp_rank, model in enumerate(self.model):
                 if len(self.model) > 1:
                     mpu.set_virtual_pipeline_model_parallel_rank(vpp_rank)
@@ -245,7 +171,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     model = model.module
                 state_dict[key] = model.sharded_state_dict()
 
-        # Optimizer State Dict
         if self.should_save_optimizer or self.should_load_optimizer:
             torch.distributed.barrier()
             optimizer_sharded_states = self.optimizer.sharded_state_dict(state_dict)
@@ -255,7 +180,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 lr_state_dict = self.lr_scheduler.state_dict()
                 state_dict["lr_scheduler"] = lr_state_dict
 
-        # RNG States State Dict
         if self.should_save_extra or self.should_load_extra:
             torch.distributed.barrier()
             rng_state = self.get_rng_state()
@@ -264,7 +188,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         return state_dict
 
     def load_rng_states(self, rng_states, data_parallel_random_init=False, use_dist_ckpt=True):
-        # access rng_state for data parallel rank
+
         if data_parallel_random_init:
             rng_states = rng_states[mpu.get_data_parallel_rank()]
         else:
@@ -276,7 +200,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         if get_device_name() != "cpu":
             get_torch_device().set_rng_state(rng_states[f"{get_device_name()}_rng_state"])
 
-        # Check for empty states array
         if not rng_states["rng_tracker_states"]:
             raise KeyError
         tensor_parallel.get_cuda_rng_tracker().set_states(rng_states["rng_tracker_states"])
@@ -287,7 +210,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
         dist_checkpoint_path = get_dist_checkpoint_path(local_path)
 
-        # Get State Dict for loading
         sharded_state_dict = self.generate_state_dict()
         log_with_rank(f"Generated state dict for saving: {sharded_state_dict.keys()}", rank=self.rank, logger=logger)
         for vpp_rank, model in enumerate(self.model):
@@ -301,7 +223,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     logger=logger,
                 )
 
-        # Load Dist Checkpointing
         state_dict = load_dist_checkpointing(
             sharded_state_dict=sharded_state_dict,
             ckpt_dir=dist_checkpoint_path,
@@ -361,10 +282,9 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 )
 
     def save_checkpoint(self, local_path: str, hdfs_path: str = None, global_step: int = 0, max_ckpt_to_keep=None):
-        # record the previous global step
+
         self.previous_global_step = global_step
 
-        # remove previous local_path
         if (
             max_ckpt_to_keep
             and isinstance(max_ckpt_to_keep, int)
@@ -379,7 +299,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         dist_checkpoint_path = get_dist_checkpoint_path(local_path)
 
         if self.use_dist_checkpointing:
-            # Generate state dict for saving
+
             state_dict = self.generate_state_dict()
             log_with_rank(f"Generated state dict for saving: {state_dict.keys()}", rank=self.rank, logger=logger)
             for vpp_rank, model in enumerate(self.model):
@@ -390,14 +310,13 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     log_with_rank(
                         f"Generated state dict for saving: {state_dict['model'].keys()}", rank=self.rank, logger=logger
                     )
-            # Start Async save if enabled
+
             async_save_request = save_dist_checkpointing(
                 sharded_state_dict=state_dict,
                 ckpt_path=dist_checkpoint_path,
                 async_save=self.checkpoint_config.async_save,
             )
 
-            # Synchronize all async save requests
             if not self.checkpoint_config.async_save:
                 assert async_save_request is None, "Async save request should be None when not using async save."
                 torch.distributed.barrier()
@@ -409,20 +328,19 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             log_with_rank(f"Saved bridge checkpoint to {hf_ckpt_path}", rank=self.rank, logger=logger)
 
         if self.should_save_model:
-            # Only rank 0 saves the hf config and tokenizer to huggingface path
-            # No matter whether we save hf model or not
+
             if self.rank == 0:
-                # Save tokenizer
+
                 hf_config_tokenizer_path = get_hf_model_checkpoint_path(local_path)
                 self.processing_class.save_pretrained(hf_config_tokenizer_path)
-                # Save huggingface config
+
                 self.hf_config.save_pretrained(hf_config_tokenizer_path)
                 if hasattr(self.hf_config, "name_or_path") and self.hf_config.name_or_path:
                     try:
                         generation_config = GenerationConfig.from_pretrained(self.hf_config.name_or_path)
                         generation_config.save_pretrained(hf_config_tokenizer_path)
                     except Exception:
-                        # if the generation config isn't available, we don't save it
+
                         pass
                 log_with_rank(
                     f"Saved Huggingface config and tokenizer to {hf_config_tokenizer_path}",
@@ -433,7 +351,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
         if self.should_save_extra:
             if self.rank == 0:
-                # Save transformer config
+
                 print(self.transformer_config)
                 transformer_config_dict = asdict(self.transformer_config)
                 to_convert_types = {torch.dtype: str, AttnBackend: str}
@@ -453,7 +371,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     json.dump(transformer_config_dict, f, indent=2)
 
         if self.should_save_hf_model:
-            # wait for everyone to dump to local
+
             state_dict = self.weight_saver(
                 self.model,
                 self.hf_config,
@@ -476,7 +394,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
                         model = MistralForSequenceClassification.from_pretrained(
                             self.config.model.path
-                        )  # use score head instead of lm_head
+                        )
                         state_dict["score.weight"] = state_dict["score.weight"]
                     else:
                         from transformers import AutoModelForCausalLM
@@ -503,7 +421,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     )
 
         def finalize_save_fn():
-            # Rank 0 uploads checkpoint to HDFS if hdfs_path is provided
+
             log_with_rank(
                 f"Dist checkpointing save completed for {dist_checkpoint_path}", rank=self.rank, logger=logger
             )

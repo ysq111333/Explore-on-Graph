@@ -1,31 +1,16 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 import re
 
-# Get PR title from environment
 pr_title = os.environ.get("PR_TITLE", "").strip()
 
-# Define rules
 allowed_modules = ["fsdp", "megatron", "sglang", "vllm", "rollout", "trainer"]
 allowed_modules += ["tests", "training_utils", "recipe", "hardware", "deployment"]
 allowed_modules += ["ray", "worker", "single_controller", "misc", "docker", "ci"]
 allowed_modules += ["perf", "model", "algo", "env", "tool", "ckpt", "doc", "data", "cfg"]
 allowed_types = ["feat", "fix", "refactor", "chore", "test"]
 
-# Check for [BREAKING] prefix and extract the rest of the title
 breaking_match = re.match(r"^\[BREAKING\]\s*(.+)$", pr_title, re.IGNORECASE)
 if breaking_match:
     core_pr_title = breaking_match.group(1).strip()
@@ -34,7 +19,6 @@ else:
     core_pr_title = pr_title
     is_breaking = False
 
-# Build dynamic regex pattern for modules (now working on core_pr_title)
 re_modules_pattern = re.compile(r"^\[([a-z_,\s]+)\]", re.IGNORECASE)
 re_modules = re_modules_pattern.match(core_pr_title)
 if not re_modules:
@@ -62,6 +46,5 @@ if not match:
 
 change_type = match.group(1).lower()
 
-# Build the success message
 breaking_info = " (BREAKING CHANGE)" if is_breaking else ""
 print(f"✅ PR title is valid: {pr_title}, modules: {modules}, type: {change_type}{breaking_info}")

@@ -1,16 +1,4 @@
-# Copyright 2024 Bytedance Ltd. and/or its affiliates
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+
 
 import os
 from pathlib import Path
@@ -21,17 +9,13 @@ from hydra import compose, initialize_config_dir
 from verl.trainer.config.config import CriticConfig, FSDPCriticConfig, MegatronCriticConfig
 from verl.utils.config import omega_conf_to_dataclass
 
-
 class TestCriticConfig:
-    """Test suite for critic configuration dataclasses."""
 
     @pytest.fixture
     def config_dir(self):
-        """Get the path to the config directory."""
         return Path(__file__).parent.parent.parent.parent / "verl" / "trainer" / "config" / "critic"
 
     def test_megatron_critic_config_instantiation_from_yaml(self, config_dir):
-        """Test that MegatronCriticConfig can be instantiated from megatron_critic.yaml."""
         yaml_path = config_dir / "megatron_critic.yaml"
         assert yaml_path.exists(), f"Config file not found: {yaml_path}"
 
@@ -63,7 +47,6 @@ class TestCriticConfig:
         assert megatron_config_obj.strategy == "megatron"
 
     def test_fsdp_critic_config_instantiation_from_yaml(self, config_dir):
-        """Test that FSDPCriticConfig can be instantiated from dp_critic.yaml."""
         yaml_path = config_dir / "dp_critic.yaml"
         assert yaml_path.exists(), f"Config file not found: {yaml_path}"
 
@@ -96,7 +79,6 @@ class TestCriticConfig:
         assert fsdp_config_obj.strategy == "fsdp"
 
     def test_config_inheritance_hierarchy(self):
-        """Test that the inheritance hierarchy is correct."""
         megatron_config = MegatronCriticConfig()
         assert isinstance(megatron_config, CriticConfig)
         assert isinstance(megatron_config, MegatronCriticConfig)
@@ -111,7 +93,6 @@ class TestCriticConfig:
         assert not isinstance(critic_config, FSDPCriticConfig)
 
     def test_config_dict_interface(self):
-        """Test that configs provide dict-like interface from BaseConfig."""
         config = CriticConfig()
 
         assert "strategy" in config
@@ -127,7 +108,6 @@ class TestCriticConfig:
         assert len(config) > 0
 
     def test_frozen_fields_immutability(self):
-        """Test that frozen fields raise exceptions when modified after creation."""
         critic_config = CriticConfig()
         frozen_fields = ["rollout_n", "strategy", "cliprange_value"]
 
@@ -150,7 +130,6 @@ class TestCriticConfig:
                 setattr(fsdp_config, field_name, "modified_value")
 
     def test_batch_size_fields_modifiable(self):
-        """Test that batch size fields can be modified after creation."""
         critic_config = CriticConfig()
 
         critic_config.ppo_mini_batch_size = 8
